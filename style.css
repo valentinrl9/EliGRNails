@@ -1,12 +1,12 @@
 /* =========================================
-   VARIABLES Y BASE
+   1. VARIABLES Y CONFIGURACIÓN BASE
    ========================================= */
 :root {
     --nude-rosa: #e69c9c;
-    --nude-rosa-glass: rgba(230, 156, 156, 0.85);
     --dorado: #c5a059;
     --negro-suave: #1a1a1a;
     --blanco-fondo: #fffaf9;
+    --shadow: 0 8px 30px rgba(0,0,0,0.12);
 }
 
 body {
@@ -14,38 +14,35 @@ body {
     font-family: 'Poppins', sans-serif;
     color: var(--negro-suave);
     margin: 0;
-    padding: 0;
+    overflow-x: hidden;
 }
 
 /* =========================================
-   NAVBAR (CONTROL ESTRICTO DE TAMAÑO)
+   2. NAVBAR Y NAVEGACIÓN
    ========================================= */
 .navbar {
     background-color: var(--negro-suave) !important;
     border-bottom: 2px solid var(--dorado);
-    height: 80px !important; /* Altura fija para evitar saltos */
-    padding: 0 1rem !important;
-    display: flex;
-    align-items: center;
+    height: 80px !important;
+    padding: 0 1.5rem !important;
 }
 
 .navbar-brand {
     display: flex;
     align-items: center;
-    padding: 0;
 }
 
 .navbar-brand img {
-    height: 55px !important; /* Ajuste fijo para el logo */
+    height: 50px !important;
     width: auto !important;
     object-fit: contain;
 }
 
 .navbar-brand span {
     font-family: 'Playfair Display', serif;
-    font-size: 1.3rem;
-    margin-left: 10px;
+    font-size: 1.4rem;
     letter-spacing: 2px;
+    margin-left: 12px;
     background: linear-gradient(to right, #bf953f, #fcf6ba, #b38728);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -53,163 +50,318 @@ body {
 
 .btn-nav {
     color: #ffffff !important;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     text-transform: uppercase;
     letter-spacing: 1px;
-    padding: 8px 15px !important;
+    padding: 10px 18px !important;
     border-radius: 8px !important;
-    transition: 0.3s;
+    transition: all 0.3s ease;
+    border: 1px solid transparent !important;
+}
+
+.btn-nav:hover {
+    color: var(--dorado) !important;
 }
 
 .btn-nav.active {
     background-color: var(--dorado) !important;
     color: var(--negro-suave) !important;
-    font-weight: bold;
-    box-shadow: 0 4px 10px rgba(197, 160, 89, 0.4);
-}
-
-/* =========================================
-   FORMULARIOS Y MODALES
-   ========================================= */
-.label-custom {
-    font-size: 0.75rem;
     font-weight: 600;
-    text-transform: uppercase;
-    color: #666;
-    margin-bottom: 3px;
-}
-
-.form-control, .form-select {
-    border: 1px solid #eee;
-    border-radius: 10px;
-    padding: 10px;
-}
-
-.form-control:focus {
-    border-color: var(--nude-rosa);
-    box-shadow: 0 0 0 0.2rem rgba(212, 140, 140, 0.25);
-}
-
-.modal-content {
-    border-radius: 20px;
-    border: none;
-    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(197, 160, 89, 0.4);
 }
 
 /* =========================================
-   CALENDARIO (ESTILO PREMIUM)
+   3. CALENDARIO (LUXURY STYLE)
    ========================================= */
 #calendario {
     background: white;
     border-radius: 15px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    padding: 15px;
+    box-shadow: var(--shadow);
 }
 
-.fc-header-toolbar {
-    padding: 20px !important;
-    margin-bottom: 0 !important;
-}
-
-.fc-button-primary {
-    background-color: var(--negro-suave) !important;
-    border-color: var(--dorado) !important;
-    color: var(--dorado) !important;
-}
-
-.fc-button-active {
-    background-color: var(--dorado) !important;
-    color: white !important;
-}
-
-/* Cabeceras de los días */
+/* Cabeceras de Días (Negro y Dorado) */
 .fc-theme-standard .fc-col-header-cell {
-    background-color: var(--negro-suave);
-    border-bottom: 2px solid var(--dorado) !important;
+    background-color: var(--negro-suave) !important;
+    border-bottom: 3px solid var(--dorado) !important;
 }
 
 .fc-col-header-cell-cushion {
-    text-transform: capitalize;
     color: var(--dorado) !important;
     font-weight: 700;
     text-decoration: none !important;
     padding: 12px 0 !important;
+    text-transform: uppercase;
     letter-spacing: 1px;
 }
 
-/* =========================================
-   CITAS: GLASSMORPHISM (OPCIÓN 3)
-   ========================================= */
+/* Columna de Horas */
+.fc .fc-timegrid-axis, 
+.fc .fc-timegrid-slot-label {
+    background-color: var(--negro-suave) !important;
+    border-right: 2px solid var(--dorado) !important;
+    width: 100px !important;
+}
+
+.fc .fc-timegrid-slot-label-cushion {
+    color: var(--dorado) !important;
+    font-weight: 600;
+    text-decoration: none !important;
+}
+
+/* Citas en Agenda */
 .fc-v-event {
-    background: var(--nude-rosa-glass) !important;
-    backdrop-filter: blur(5px);
-    -webkit-backdrop-filter: blur(5px);
+    background-color: var(--nude-rosa) !important;
     border: none !important;
-    border-left: 5px solid var(--dorado) !important; /* Pestaña lateral dorada */
-    border-radius: 8px !important;
-    padding: 5px !important;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+    border-left: 5px solid var(--dorado) !important;
+    border-radius: 6px !important;
+    box-shadow: 2px 4px 10px rgba(0,0,0,0.1);
 }
 
 .fc-event-main {
     color: var(--negro-suave) !important;
     font-weight: 600;
+    padding: 5px !important;
 }
 
-/* =========================================
-   COLUMNA DE HORAS (ANCHO CONTROLADO)
-   ========================================= */
-.fc .fc-timegrid-axis, 
-.fc .fc-timegrid-slot-label,
-.fc .fc-timegrid-axis-frame {
-    width: 95px !important;
-    min-width: 95px !important;
-    max-width: 95px !important;
-}
-
-.fc .fc-timegrid-slot-label-cushion {
-    width: 100% !important;
-    text-align: center !important;
-    display: block !important;
-    color: var(--negro-suave);
-    font-weight: 600;
-    text-decoration: none !important;
-}
-
-/* Cuadrícula interna */
-.fc-theme-standard td, .fc-theme-standard th {
-    border: 1px solid rgba(197, 160, 89, 0.1) !important;
-}
-
-.fc-timegrid-now-indicator-line {
-    border-color: var(--dorado) !important;
-    border-width: 2px !important;
-}
-
-/* =========================================
-   CURSORES (LÁPIZ DORADO)
-   ========================================= */
+/* Cursor Personalizado (Lápiz) */
 .fc-timegrid-slot {
     cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="%23c5a059"><path d="M7.127 22.564l-7.127 1.436 1.436-7.127 12.333-12.333 5.691 5.691-12.333 12.333zm9.332-21.821l-10.32 10.319 3.09 3.09 10.319-10.32-3.089-3.089zm4.234 4.162l-3.09-3.09 1.407-1.407c.517-.517 1.357-.517 1.875 0l1.215 1.215c.517.517.517 1.357 0 1.875l-1.407 1.407z"/></svg>') 0 22, crosshair !important;
 }
 
-.fc-event, .fc-button, .btn, .fc-col-header-cell-cushion {
-    cursor: pointer !important;
+/* =========================================
+   4. MODALES Y FORMULARIOS
+   ========================================= */
+.modal-content {
+    border-radius: 20px;
+    border: none;
+    overflow: hidden;
+    box-shadow: var(--shadow);
 }
 
-.fc-event:hover {
-    filter: brightness(0.9);
-    transform: scale(1.02);
-    transition: 0.2s ease;
+.label-custom {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    color: #666;
+    margin-bottom: 2px;
+    display: block;
+}
+
+.form-control, .form-select {
+    border: 1px solid #eee;
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+
+.form-control-sm {
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    padding: 0.4rem 0.6rem;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: var(--nude-rosa);
+    box-shadow: 0 0 0 0.2rem rgba(230, 156, 156, 0.25);
+}
+
+.text-gold {
+    color: var(--dorado) !important;
 }
 
 /* =========================================
-   LISTAS DE CLIENTES Y SERVICIOS
+   5. LISTAS Y TABLAS DE VENTAS
    ========================================= */
-.list-group-item {
+/* Tarjetas generales del panel */
+.card {
+    border-radius: 15px;
     border: none;
-    margin-bottom: 8px;
-    border-radius: 12px !important;
-    background: white;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.02);
-    border-left: 4px solid var(--nude-rosa) !important;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+}
+
+/* Tablas con estilo limpio y cabecera dorada */
+.table {
+    margin-bottom: 0;
+}
+
+.table thead th {
+    background-color: var(--negro-suave);
+    color: var(--dorado);
+    border: none;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+    padding: 18px;
+    letter-spacing: 1px;
+}
+
+.table tbody td {
+    padding: 15px;
+    vertical-align: middle;
+    border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+
+/* --- TARJETAS DE SERVICIOS (ESTILO BOTÓN DORADO LUJOSO) --- */
+.list-group-item {
+    border: 3px solid var(--dorado) !important; /* Línea más gruesa dorada */
+    margin-bottom: 15px;
+    border-radius: 15px !important;
+    
+    /* Fondo oscuro con gradiente para dar profundidad */
+    background: linear-gradient(145deg, #222222, #0a0a0a) !important;
+    color: white;
+    
+    /* Efecto de Relieve y Sombra Proyectada */
+    box-shadow: 0 8px 15px rgba(0,0,0,0.3), 
+                inset 0 0 15px rgba(197, 160, 89, 0.2) !important;
+    
+    /* Biselado interno (línea fina decorativa) */
+    outline: 1px solid rgba(197, 160, 89, 0.3);
+    outline-offset: -10px;
+    
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 25px !important;
+}
+
+/* Efecto al pasar el ratón (Hover) */
+.list-group-item:hover {
+    transform: translateY(-5px) scale(1.02);
+    border-color: #fcf6ba !important; /* Oro brillante al tocar */
+    box-shadow: 0 15px 30px rgba(0,0,0,0.5), 
+                0 0 15px rgba(197, 160, 89, 0.4) !important;
+}
+
+/* Destello de luz que cruza la tarjeta */
+.list-group-item::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 50%;
+    height: 100%;
+    background: linear-gradient(
+        to right, 
+        transparent, 
+        rgba(255, 255, 255, 0.1), 
+        transparent
+    );
+    transform: skewX(-25deg);
+    transition: 0.7s;
+}
+
+.list-group-item:hover::before {
+    left: 150%;
+}
+
+/* Estilo para el precio dentro de la tarjeta */
+.list-group-item strong, .precio-tag {
+    font-size: 1.5rem;
+    font-weight: 800;
+    /* Gradiente metálico de oro */
+    background: linear-gradient(to bottom, #bf953f, #fcf6ba, #b38728, #fcf6ba, #aa771c);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5));
+}
+
+/* Borde dorado simple para otros elementos */
+.border-gold {
+    border: 2px solid var(--dorado) !important;
+    box-shadow: 0 0 10px rgba(197, 160, 89, 0.2);
+}
+
+
+/* Estilo para los botones de acción rápida */
+.btn-success {
+    background-color: #28a745 !important;
+    border: none !important;
+}
+
+.btn-dark {
+    background-color: var(--negro-suave) !important;
+    border: none;
+}
+
+/* Estilo para eventos cobrados en el calendario */
+.fc-event.fc-event-cobrado {
+    opacity: 0.7;
+    text-decoration: line-through; /* Opcional: si quieres tachar el texto */
+}
+
+/* Para que el icono ✅ se vea bien */
+.fc-event-title {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.card-servicio-lujo {
+    background: linear-gradient(145deg, #222222, #0a0a0a) !important;
+    border: 3px solid var(--dorado) !important;
+    color: white !important;
+    border-left: none !important; /* Quitamos el borde rosa de las clientas */
+    
+    /* Relieve y profundidad */
+    box-shadow: 0 8px 15px rgba(0,0,0,0.3), 
+                inset 0 0 15px rgba(197, 160, 89, 0.2) !important;
+    
+    /* Biselado interno */
+    outline: 1px solid rgba(197, 160, 89, 0.3);
+    outline-offset: -10px;
+}
+
+.card-servicio-lujo:hover {
+    transform: translateY(-5px) scale(1.02);
+    border-color: #fcf6ba !important;
+    box-shadow: 0 15px 30px rgba(0,0,0,0.5), 0 0 15px rgba(197, 160, 89, 0.4) !important;
+}
+
+/* El precio dorado brillante */
+.precio-tag {
+    font-size: 1.4rem;
+    font-weight: 800;
+    background: linear-gradient(to bottom, #bf953f, #fcf6ba, #b38728, #fcf6ba, #aa771c);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5));
+}
+
+
+/* Pega esto en tu .css o dentro de <style> */
+
+#content-clientes, #content-servicios {
+    position: relative;
+    min-height: 80vh; /* Para que el logo tenga espacio incluso si hay pocos datos */
+}
+
+#content-clientes::before, 
+#content-servicios::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 350px; /* Tamaño del logo */
+    height: 350px;
+    
+    background-image: url('logo3.png'); 
+    
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    opacity: 0.5; /* Si lo ves mucho, bájalo a 0.05 */
+    z-index: 0;
+    pointer-events: none; /* Esto permite hacer clic en las clientas aunque el logo esté "encima" */
+}
+
+/* Esto asegura que las letras y botones no queden tapados por el logo */
+#content-clientes > *, #content-servicios > * {
+    position: relative;
+    z-index: 1;
 }

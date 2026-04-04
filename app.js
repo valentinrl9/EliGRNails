@@ -1,22 +1,30 @@
-// 1. CONFIGURACIÓN DE BASE DE DATOS (DEXIE)
+// =========================================
+// 1. CONFIGURACIÓN DE BASE DE DATOS (V2)
+// =========================================
 const db = new Dexie("SalonDB");
-db.version(1).stores({
-    clientas: "++id, nombre, apellidos, telefono, direccion, cp, poblacion, cumpleaños, observaciones",
+db.version(2).stores({
+    clientas: "++id, nombre, telefono, email, direccion, cp, localidad, observaciones",
     servicios: "++id, nombre, coste",
-    agenda: "++id, clienteId, servicioId, fecha"
+    agenda: "++id, clienteId, servicioId, fecha",
+    ventas: "++id, clienteId, servicioId, fecha, importe, metodoPago" 
 });
 
 let calendar;
+let citaParaCobrar = null;
 
-// 2. INICIALIZACIÓN AL CARGAR EL DOM
+// =========================================
+// 2. INICIALIZACIÓN AL CARGAR LA PÁGINA
+// =========================================
 document.addEventListener('DOMContentLoaded', () => {
     initCalendar();
-    actualizarSelectores();
+    listarClientas();
     listarServicios();
-    listarClientes();
+    actualizarSelectores();
 });
 
-// 3. FUNCIÓN DEL CALENDARIO
+// =========================================
+// 3. LÓGICA DEL CALENDARIO (FullCalendar)
+// =========================================
 function initCalendar() {
     const calendarEl = document.getElementById('calendario');
     if (!calendarEl) return;
@@ -27,104 +35,139 @@ function initCalendar() {
         firstDay: 1,
         allDaySlot: false,
         nowIndicator: true,
-
-        // --- FORMATO DE HORA (Ajustado para legibilidad) ---
-        slotLabelFormat: {
-            hour: 'numeric',
-            minute: '2-digit',
-            omitZeroMinute: false,
-            meridiem: false,
-            hour12: false
-        },
-        slotLabelContent: function(arg) {
-            return { html: '&nbsp;' + arg.text + '&nbsp;' }; 
-        },
-        slotLabelInterval: "00:30", 
-        
-        // --- CONFIGURACIÓN DE TIEMPOS ---
-        slotMinTime: '10:00:00', 
+        slotMinTime: '10:00:00',
         slotMaxTime: '21:00:00',
-        slotDuration: '00:15:00', 
-        
-        businessHours: {
-            daysOfWeek: [ 1, 2, 3, 4, 5 ],
-            startTime: '10:00',
-            endTime: '21:00',
+        slotDuration: '00:30:00',
+        slotLabelInterval: "00:30",
+        defaultTimedEventDuration: '01:30:00',
+        slotLabelFormat: {
+            hour: '2-digit',
+            minute: '2-digit',
+            omitZeroMinute: false, // Esto fuerza el :00
+            meridiem: false,
+            hour12: false // Formato 24h
+        },
+        headerToolbar: {
+            left: 'prev,next today',
+            center: 'title',
+            right: 'timeGridWeek,timeGridDay'
         },
 
-        headerToolbar: { 
-            left: 'prev,next today', 
-            center: 'title', 
-            right: 'timeGridWeek,timeGridDay' 
-        },
-
-        // --- COMPORTAMIENTO AUTOMÁTICO ---
-        datesSet: function(info) {
-            if (info.view.type === 'timeGridDay') {
-                const hoy = new Date().toDateString();
-                const diaVista = info.view.currentStart.toDateString();
-                if (diaVista !== hoy) {
-                    calendar.today();
-                }
-            }
-        },
-
-        expandRows: true,
-        height: 'auto',
-
-        // --- CARGA DE EVENTOS ---
-        events: async function(info, successCallback) {
-            try {
-                const citas = await db.agenda.toArray();
-                const eventos = await Promise.all(citas.map(async (c) => {
-                    const cli = await db.clientas.get(c.clienteId);
-                    const ser = await db.servicios.get(c.servicioId);
-                    return {
-                        id: c.id,
-                        title: `${cli ? cli.nombre : 'S/N'} - ${ser ? ser.nombre : ''}`,
-                        start: c.fecha,
-                        backgroundColor: '#e69c9c', 
-                        borderColor: '#c5a059',      
-                        textColor: '#1a1a1a'
-                    };
-                }));
-                successCallback(eventos);
-            } catch (e) { console.error(e); }
-        },
-
-        // Click en hueco vacío (NUEVA CITA)
+        // Click en hueco vacío (Nueva Cita)
         dateClick: function(info) {
             const modalEl = document.getElementById('modalCita');
-            modalEl.removeAttribute('data-edit-id'); // Limpiamos ID de edición
-            document.getElementById('modalCitaTitulo').innerText = "Nueva Cita";
             
-            const inputFecha = document.getElementById('citaFecha');
-            if (inputFecha) inputFecha.value = info.dateStr.substring(0, 16);
+            // 1. Limpiamos el ID de edición (esto indica que es NUEVA cita)
+            modalEl.removeAttribute('data-edit-id');
+            
+            // 2. DESBLOQUEAMOS todos los campos y botones (IMPORTANTE)
+            const inputs = modalEl.querySelectorAll('input, select');
+            inputs.forEach(i => i.disabled = false); // Volver a habilitar
+            
+            const btnGuardar = modalEl.querySelector('button[onclick="agendarCita()"]');
+            const btnEliminar = document.getElementById('btnEliminarCita');
+            const btnCobrar = document.getElementById('btnCobrarCita');
+
+            // 3. Restauramos la visualización original
+            document.getElementById('modalCitaTitulo').innerText = "Nueva Cita";
+            btnGuardar.style.display = 'block';
+            btnEliminar.style.display = 'none'; // No se puede eliminar algo que no existe
+            btnCobrar.style.display = 'none';   // No se puede cobrar algo que no existe
+            
+            // Restaurar estilo del botón cobrar por si venía de una cita bloqueada
+            btnCobrar.disabled = false;
+            btnCobrar.classList.replace('btn-secondary', 'btn-success');
+            btnCobrar.innerHTML = '<i class="fa-solid fa-cash-register me-2"></i> FINALIZAR Y COBRAR';
+
+            // 4. Seteamos la fecha (con el redondeo de 15 min que ya tenías)
+            let fecha = new Date(info.date);
+            fecha.setMinutes(Math.round(fecha.getMinutes() / 15) * 15);
+            const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+            const localISOTime = (new Date(fecha - tzoffset)).toISOString().slice(0, 16);
+            document.getElementById('citaFecha').value = localISOTime;
             
             new bootstrap.Modal(modalEl).show();
         },
 
-        // Click en cita existente (EDITAR/ELIMINAR)
+        // Click en cita existente (Editar/Cobrar)
         eventClick: function(info) {
-            prepararEdicionCita(info.event.id);
+            if (info.event && info.event.id) {
+                prepararEdicionCita(info.event.id);
+            }
+        },
+
+        // Carga de eventos desde Dexie
+        // Dentro de initCalendar -> events:
+        events: async function(info, successCallback) {
+            const citas = await db.agenda.toArray();
+            const eventos = await Promise.all(citas.map(async (c) => {
+                const cli = await db.clientas.get(c.clienteId);
+                const ser = await db.servicios.get(c.servicioId);
+                const isCobrado = (c.cobrado === true || c.cobrado === "true");
+                
+                // Si está cobrada, añadimos el check y cambiamos estilo
+                const titulo = c.cobrado ? `✅ ${cli.nombre}` : `${cli ? cli.nombre : 'S/N'}`;
+                const colorFondo = c.cobrado ? '#d1d1d1' : '#e69c9c'; // Gris si está cobrada
+                const colorBorde = c.cobrado ? '#bc9c59' : '#c5a059';
+
+                return {
+                    id: c.id,
+                    title: `${titulo} - ${ser ? ser.nombre : ''}`,
+                    start: c.fecha,
+                    backgroundColor: colorFondo,
+                    borderColor: colorBorde,
+                    textColor: c.cobrado ? '#777' : '#1a1a1a',
+                    extendedProps: { cobrado: c.cobrado } // Pasamos esta info para el bloqueo
+                };
+            }));
+            successCallback(eventos);
         }
     });
-
     calendar.render();
 }
 
-// 4. GESTIÓN DE CITAS (AGENDA)
+// =========================================
+// 4. GESTIÓN DE CITAS
+// =========================================
 async function prepararEdicionCita(id) {
     const cita = await db.agenda.get(parseInt(id));
     if (!cita) return;
 
     const modalEl = document.getElementById('modalCita');
-    modalEl.setAttribute('data-edit-id', id); // Guardamos el ID para saber que editamos
+    modalEl.setAttribute('data-edit-id', id);
     
-    document.getElementById('modalCitaTitulo').innerText = "Gestionar Cita";
+    // Referencias a elementos
+    const btnGuardar = modalEl.querySelector('button[onclick="agendarCita()"]');
+    const btnEliminar = document.getElementById('btnEliminarCita');
+    const btnCobrar = document.getElementById('btnCobrarCita');
+    const inputs = modalEl.querySelectorAll('input, select');
+
+    if (cita.cobrado) {
+        document.getElementById('modalCitaTitulo').innerText = "Cita Finalizada (Bloqueada)";
+        // Desactivar todo
+        inputs.forEach(i => i.disabled = true);
+        btnGuardar.style.display = 'none';
+        btnEliminar.style.display = 'none';
+        btnCobrar.innerHTML = '<i class="fa-solid fa-lock me-2"></i> YA COBRADO';
+        btnCobrar.disabled = true;
+        btnCobrar.classList.replace('btn-success', 'btn-secondary');
+        document.getElementById('btnForzarDesbloqueo').style.display = 'inline-block'; // Mostrar botón de pánico
+    } else {
+        document.getElementById('modalCitaTitulo').innerText = "Gestionar Cita";
+        // Activar todo
+        inputs.forEach(i => i.disabled = false);
+        btnGuardar.style.display = 'block';
+        btnEliminar.style.display = 'block';
+        btnCobrar.innerHTML = '<i class="fa-solid fa-cash-register me-2"></i> FINALIZAR Y COBRAR';
+        btnCobrar.disabled = false;
+        btnCobrar.classList.replace('btn-secondary', 'btn-success');
+        btnCobrar.style.display = 'block';
+        document.getElementById('btnForzarDesbloqueo').style.display = 'none'; // Esconderlo si está pendiente
+    }
+
     document.getElementById('selCli').value = cita.clienteId;
     document.getElementById('selSer').value = cita.servicioId;
-    document.getElementById('citaFecha').value = cita.fecha.substring(0, 16);
+    document.getElementById('citaFecha').value = cita.fecha;
 
     new bootstrap.Modal(modalEl).show();
 }
@@ -132,209 +175,463 @@ async function prepararEdicionCita(id) {
 async function agendarCita() {
     const modalEl = document.getElementById('modalCita');
     const editId = modalEl.getAttribute('data-edit-id');
+    
+    // 1. Recogemos los valores básicos
+    const clienteId = parseInt(document.getElementById('selCli').value);
+    const servicioId = parseInt(document.getElementById('selSer').value);
+    const fecha = document.getElementById('citaFecha').value;
 
-    const cId = document.getElementById('selCli').value;
-    const sId = document.getElementById('selSer').value;
-    const f = document.getElementById('citaFecha').value;
-
-    if (!cId || !sId || !f) return alert("Por favor, completa todos los campos");
-
-    const datos = { 
-        clienteId: parseInt(cId), 
-        servicioId: parseInt(sId), 
-        fecha: f 
-    };
-
-    if (editId) {
-        await db.agenda.update(parseInt(editId), datos);
-    } else {
-        await db.agenda.add(datos);
+    if (!clienteId || !servicioId || !fecha) {
+        alert("Por favor, rellena todos los campos.");
+        return;
     }
 
+    if (editId) {
+        // 2. Si editamos, solo actualizamos los campos que cambian.
+        // NO tocamos el campo 'cobrado' para que no se desconfigure.
+        await db.agenda.update(parseInt(editId), {
+            clienteId: clienteId,
+            servicioId: servicioId,
+            fecha: fecha
+        });
+    } else {
+        // 3. Si es nueva, la creamos con cobrado: false por defecto
+        await db.agenda.add({
+            clienteId: clienteId,
+            servicioId: servicioId,
+            fecha: fecha,
+            cobrado: false
+        });
+    }
+
+    // 4. Refrescamos y cerramos
     calendar.refetchEvents();
-    bootstrap.Modal.getInstance(modalEl).hide();
-    modalEl.removeAttribute('data-edit-id');
+    const modalInstance = bootstrap.Modal.getInstance(modalEl);
+    if (modalInstance) modalInstance.hide();
 }
 
 async function eliminarCita() {
-    const modalEl = document.getElementById('modalCita');
-    const id = modalEl.getAttribute('data-edit-id');
-    
-    if (!id) return;
-    
-    if (confirm("¿Seguro que quieres eliminar esta cita?")) {
+    const id = document.getElementById('modalCita').getAttribute('data-edit-id');
+    if (id && confirm("¿Estás segura de eliminar esta cita?")) {
         await db.agenda.delete(parseInt(id));
         calendar.refetchEvents();
-        bootstrap.Modal.getInstance(modalEl).hide();
-        modalEl.removeAttribute('data-edit-id');
+        bootstrap.Modal.getInstance(document.getElementById('modalCita')).hide();
     }
 }
 
-// 5. GESTIÓN DE CLIENTES
-async function listarClientes(filtrados = null) {
-    const div = document.getElementById('listaClientes');
-    if (!div) return;
-    const lista = filtrados || await db.clientas.orderBy('nombre').toArray();
+// =========================================
+// 5. SISTEMA DE COBROS Y VENTAS
+// =========================================
+// Al iniciar el cobro, ponemos el precio base del servicio en el input
+async function iniciarCobro() {
+    const idCita = document.getElementById('modalCita').getAttribute('data-edit-id');
+    if (!idCita) return alert("Guarda la cita antes de cobrar.");
+
+    // 1. LEER EL SERVICIO SELECCIONADO EN PANTALLA (NO EL DE LA BD)
+    const idServicioEnPantalla = parseInt(document.getElementById('selSer').value);
+
+    // 2. BUSCAR LOS DATOS DE ESE SERVICIO ESPECÍFICO
+    const servicioReal = await db.servicios.get(idServicioEnPantalla);
+    const citaActual = await db.agenda.get(parseInt(idCita));
+
+    if (!servicioReal || !citaActual) {
+        alert("Error al recuperar los datos del servicio o la cita.");
+        return;
+    }
+
+    // 3. PREPARAR EL OBJETO DE COBRO CON LOS DATOS "FRESCOS"
+    // Guardamos el nuevo servicioId por si lo has cambiado en el modal
+    citaParaCobrar = { 
+        ...citaActual, 
+        servicioId: idServicioEnPantalla, 
+        importe: servicioReal.coste 
+    };
     
-    div.innerHTML = lista.map(c => `
-        <div class="list-group-item d-flex justify-content-between align-items-center shadow-sm p-3 mb-2">
-            <div onclick="prepararEdicion(${c.id})" style="cursor:pointer; flex-grow:1;">
-                <h6 class="mb-0 fw-bold">${c.nombre} ${c.apellidos}</h6>
-                <small class="text-muted"><i class="fa-solid fa-phone me-1"></i>${c.telefono || '--'}</small>
-            </div>
-            <div class="btn-group">
-                <button class="btn btn-sm btn-outline-primary border-0" onclick="prepararEdicion(${c.id})"><i class="fa-solid fa-pen"></i></button>
-                <button class="btn btn-sm btn-outline-danger border-0" onclick="eliminarCliente(${c.id})"><i class="fa-solid fa-trash"></i></button>
+    // 4. RELLENAR EL INPUT CON EL PRECIO DEL NUEVO SERVICIO
+    document.getElementById('inputImporteFinal').value = servicioReal.coste;
+    
+    // 5. CAMBIO DE MODALES
+    const modalCita = bootstrap.Modal.getInstance(document.getElementById('modalCita'));
+    if (modalCita) modalCita.hide();
+    
+    new bootstrap.Modal(document.getElementById('modalCobro')).show();
+}
+
+// Al confirmar, guardamos el valor que haya en el input (el editado)
+async function confirmarCobro() {
+    const importeFinal = parseFloat(document.getElementById('inputImporteFinal').value);
+    const metodo = document.getElementById('metodoPago').value;
+
+    if (isNaN(importeFinal) || importeFinal < 0) {
+        alert("Por favor, introduce un importe válido.");
+        return;
+    }
+    await db.ventas.add({
+        citaId: citaParaCobrar.id, // <--- Añadimos esto
+        clienteId: citaParaCobrar.clienteId,
+        servicioId: citaParaCobrar.servicioId,
+        fecha: new Date().toISOString(),
+        importe: importeFinal,
+        metodoPago: metodo
+    });
+
+    await db.agenda.update(citaParaCobrar.id, { cobrado: true });
+    
+    calendar.refetchEvents();
+    bootstrap.Modal.getInstance(document.getElementById('modalCobro')).hide();
+    
+    // Si tienes abierta la pestaña de ventas, la actualizamos
+    if(typeof cargarHistorialVentas === 'function') cargarHistorialVentas();
+    alert(`Venta registrada: ${importeFinal}€`);
+}
+
+async function revertirCobro(ventaId, citaId) {
+    if (!confirm("¿Segura que quieres anular este cobro? La cita volverá a estar pendiente.")) return;
+
+    try {
+        // 1. Eliminamos el registro de la venta
+        await db.ventas.delete(parseInt(ventaId));
+
+        // 2. IMPORTANTE: Cambiamos el estado en la agenda
+        // Usamos parseInt para asegurar que el ID es numérico
+        await db.agenda.update(parseInt(citaId), { cobrado: false });
+
+        // 3. Forzamos la actualización de la interfaz
+        alert("Cobro anulado. La cita vuelve a estar pendiente.");
+        
+        // Refrescar tabla de ventas
+        await cargarHistorialVentas();
+        
+        // Refrescar calendario
+        if (calendar) {
+            calendar.refetchEvents();
+        }
+
+    } catch (error) {
+        console.error("Error al revertir:", error);
+        alert("No se pudo anular el cobro.");
+    }
+}
+
+async function cargarHistorialVentas() {
+    const ventas = await db.ventas.orderBy('fecha').reverse().toArray();
+    const tabla = document.getElementById('tablaVentasBody');
+    let totalAcumulado = 0;
+
+    const filasHTML = await Promise.all(ventas.map(async (v) => {
+        const cli = await db.clientas.get(v.clienteId);
+        const ser = await db.servicios.get(v.servicioId);
+        totalAcumulado += v.importe;
+        
+        const fechaFormateada = new Date(v.fecha).toLocaleString('es-ES', {
+            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+        });
+
+        return `
+            <tr>
+                <td>${fechaFormateada}</td>
+                <td>${cli ? cli.nombre : 'Eliminada'}</td>
+                <td>${ser ? ser.nombre : 'Eliminado'}</td>
+                <td><span class="badge bg-secondary">${v.metodoPago}</span></td>
+                <td class="fw-bold">${v.importe}€</td>
+                <td class="text-end">
+                    <button class="btn btn-sm btn-outline-danger" onclick="revertirCobro(${v.id}, ${v.citaId})">
+                        <i class="fa-solid fa-rotate-left"></i> Anular
+                    </button>
+                </td>
+            </tr>
+        `;
+    }));
+
+    tabla.innerHTML = filasHTML.join('');
+    document.getElementById('totalCajaGeneral').innerText = `${totalAcumulado.toFixed(2)}€`;
+}
+
+
+// =========================================
+// 6. GESTIÓN DE CLIENTAS Y SERVICIOS
+// =========================================
+function abrirModalNuevoCliente() {
+    const modalEl = document.getElementById('modalClienta');
+    if (!modalEl) return;
+
+    // 1. Limpiamos el ID de edición para que el sistema sepa que es una NUEVA clienta
+    modalEl.removeAttribute('data-edit-id');
+    
+    // 2. Reseteamos el título del modal
+    const titulo = modalEl.querySelector('.modal-title');
+    if (titulo) titulo.innerText = "Añadir Nueva Clienta";
+    
+    // 3. Limpiamos todos los inputs del formulario
+    const form = document.getElementById('formClienta');
+    if (form) {
+        form.reset();
+    } else {
+        // Si no tienes etiqueta <form>, limpiamos los inputs manualmente
+        const inputs = modalEl.querySelectorAll('input, textarea');
+        inputs.forEach(input => input.value = '');
+    }
+    
+    document.getElementById('btnEliminarClienta').style.display = 'none';
+
+    // 4. Mostramos el modal
+    const modalInstance = new bootstrap.Modal(modalEl);
+    modalInstance.show();
+}
+
+async function guardarClienta() {
+    const modalEl = document.getElementById('modalClienta');
+    const id = modalEl.getAttribute('data-edit-id');
+    
+    const datos = {
+        nombre: document.getElementById('inputNombre').value,
+        telefono: document.getElementById('inputTelefono').value,
+        email: document.getElementById('inputEmail').value,
+        direccion: document.getElementById('inputDireccion').value,
+        cp: document.getElementById('inputCP').value,
+        localidad: document.getElementById('inputLocalidad').value,
+        observaciones: document.getElementById('inputObservaciones').value // <--- Nuevo
+    };
+
+    try {
+        if (id) {
+            await db.clientas.update(parseInt(id), datos);
+        } else {
+            await db.clientas.add(datos);
+        }
+
+        listarClientas();
+        actualizarSelectores();
+        bootstrap.Modal.getInstance(modalEl).hide();
+        // Resetear el formulario manualmente para la próxima vez
+        document.getElementById('formClienta').reset(); 
+    } catch (error) {
+        console.error("Error al guardar clienta:", error);
+    }
+}
+
+async function prepararEdicionClienta(id) {
+    // 1. Buscamos la clienta en la base de datos por su ID
+    const c = await db.clientas.get(parseInt(id));
+    if (!c) return;
+
+    const modalEl = document.getElementById('modalClienta');
+
+    // 2. Rellenamos cada input del modal con la info de la BD
+    // Usamos || '' para que si un campo está vacío no ponga "undefined"
+    document.getElementById('inputNombre').value = c.nombre || '';
+    document.getElementById('inputTelefono').value = c.telefono || '';
+    document.getElementById('inputEmail').value = c.email || '';
+    document.getElementById('inputDireccion').value = c.direccion || '';
+    document.getElementById('inputCP').value = c.cp || '';
+    document.getElementById('inputLocalidad').value = c.localidad || '';
+    document.getElementById('inputObservaciones').value = c.observaciones || '';
+    document.getElementById('btnEliminarClienta').style.display = 'block';
+    // 3. CAMBIAMOS EL TÍTULO DEL MODAL (Opcional pero profesional)
+    modalEl.querySelector('.modal-title').innerText = "Editar Ficha de Clienta";
+
+    // 4. GUARDAMOS EL ID en el modal para que 'guardarClienta' sepa que es una edición
+    modalEl.setAttribute('data-edit-id', id);
+
+    // 5. MOSTRAMOS EL MODAL
+    const modalInstance = new bootstrap.Modal(modalEl);
+    modalInstance.show();
+}
+
+async function listarClientas() {
+    const clis = await db.clientas.toArray();
+    const contenedor = document.getElementById('listaClientes');
+    if (!contenedor) return;
+
+    contenedor.innerHTML = clis.map(c => `
+        <div class="col-md-4 mb-3">
+            <div class="list-group-item p-3 shadow-sm border-gold bg-dark text-white" 
+                 onclick="prepararEdicionClienta(${c.id})" 
+                 style="cursor: pointer;">
+                <h6 class="mb-1 fw-bold text-gold">${c.nombre}</h6>
+                <p class="mb-0 small" style="color: #e0e0e0;">
+                    <i class="fa-solid fa-phone me-2 text-gold"></i>${c.telefono}
+                </p>
             </div>
         </div>
     `).join('');
 }
 
-async function filtrarClientes() {
-    const texto = document.getElementById('inputBusqueda').value.toLowerCase();
-    const todos = await db.clientas.toArray();
-    const filtrados = todos.filter(c => {
-        const full = (c.nombre + " " + (c.apellidos || "")).toLowerCase();
-        return full.includes(texto) || (c.telefono || "").includes(texto);
-    });
-    listarClientes(filtrados); 
-}
+async function ejecutarEliminarClienta() {
+    // 1. Buscamos el modal para extraer el ID de la clienta que estamos editando
+    const modalEl = document.getElementById('modalClienta');
+    const id = modalEl.getAttribute('data-edit-id');
 
-function prepararNuevoCliente() {
-    const campos = ['edit_cli_id', 'nom', 'ape', 'tel', 'dir', 'cp', 'pob', 'cumple', 'obs'];
-    campos.forEach(id => document.getElementById(id).value = '');
-    document.getElementById('modalClienteTitulo').innerText = 'Nueva Clienta';
-}
+    // Si no hay ID, significa que el modal está vacío (Nueva Clienta)
+    if (!id) {
+        alert("No hay ninguna clienta seleccionada para eliminar.");
+        return;
+    }
 
-async function prepararEdicion(id) {
-    const c = await db.clientas.get(id);
-    if (!c) return;
-    document.getElementById('edit_cli_id').value = c.id;
-    document.getElementById('nom').value = c.nombre;
-    document.getElementById('ape').value = c.apellidos;
-    document.getElementById('tel').value = c.telefono;
-    document.getElementById('dir').value = c.direccion || '';
-    document.getElementById('cp').value = c.cp || '';
-    document.getElementById('pob').value = c.poblacion || '';
-    document.getElementById('cumple').value = c.cumpleaños || '';
-    document.getElementById('obs').value = c.observaciones || '';
-    document.getElementById('modalClienteTitulo').innerText = 'Editar Clienta';
-    new bootstrap.Modal(document.getElementById('modalNuevoCliente')).show();
-}
+    // 2. Confirmación de seguridad para evitar sustos
+    if (confirm("¿Estás segura? Se borrará la ficha de la clienta permanentemente.")) {
+        try {
+            // 3. Borramos de la tabla 'clientas' en Dexie
+            await db.clientas.delete(parseInt(id));
 
-async function guardarCliente() {
-    const id = document.getElementById('edit_cli_id').value;
-    const datos = {
-        nombre: document.getElementById('nom').value,
-        apellidos: document.getElementById('ape').value,
-        telefono: document.getElementById('tel').value,
-        direccion: document.getElementById('dir').value,
-        cp: document.getElementById('cp').value,
-        poblacion: document.getElementById('pob').value,
-        cumpleaños: document.getElementById('cumple').value,
-        observaciones: document.getElementById('obs').value
-    };
-    if (id) await db.clientas.update(parseInt(id), datos);
-    else await db.clientas.add(datos);
-    
-    bootstrap.Modal.getInstance(document.getElementById('modalNuevoCliente')).hide();
-    listarClientes();
-    actualizarSelectores();
-}
+            // 4. Cerramos el modal de Bootstrap
+            const modalInstance = bootstrap.Modal.getInstance(modalEl);
+            if (modalInstance) modalInstance.hide();
 
-async function eliminarCliente(id) {
-    if (confirm("¿Eliminar clienta?")) { 
-        await db.clientas.delete(id); 
-        listarClientes(); 
-        actualizarSelectores(); 
+            // 5. Refrescamos la lista de clientas en pantalla
+            if (typeof listarClientas === 'function') {
+                listarClientas();
+            } else if (typeof listarClientes === 'function') {
+                listarClientes();
+            }
+
+            // 6. Actualizamos los desplegables de las citas
+            if (typeof actualizarSelectores === 'function') {
+                actualizarSelectores();
+            }
+
+            console.log("Clienta eliminada correctamente.");
+        } catch (error) {
+            console.error("Error al eliminar:", error);
+            alert("Hubo un fallo al intentar borrar la ficha.");
+        }
     }
 }
 
-// 6. GESTIÓN DE SERVICIOS
-async function listarServicios() {
-    const todos = await db.servicios.toArray();
-    const lista = document.getElementById('listaServicios');
-    if (!lista) return;
-
-    todos.sort((a, b) => a.nombre.localeCompare(b.nombre));
-
-    lista.innerHTML = todos.map(s => `
-        <li class="list-group-item d-flex align-items-center py-3 border-0 border-bottom">
-            <div class="flex-grow-1" onclick="prepararEdicionServicio(${s.id})" style="cursor:pointer;">
-                <span class="fw-bold text-uppercase" style="color: var(--negro-suave);">${s.nombre}</span>
-            </div>
-            <div class="me-3">
-                <span class="fw-bold" style="color: var(--dorado); font-size: 1.1rem;">${s.coste}€</span>
-            </div>
-            <div class="btn-group">
-                <button class="btn btn-sm text-muted" onclick="prepararEdicionServicio(${s.id})"><i class="fa-solid fa-pen fa-xs"></i></button>
-                <button class="btn btn-sm text-danger opacity-50" onclick="eliminarServicio(${s.id})"><i class="fa-solid fa-trash fa-xs"></i></button>
-            </div>
-        </li>
-    `).join('');
-}
-
-function prepararNuevoServicio() {
-    document.getElementById('edit_ser_id').value = '';
-    document.getElementById('sNom').value = '';
-    document.getElementById('sPre').value = '';
-    document.getElementById('modalServicioTitulo').innerHTML = '<i class="fa-solid fa-plus me-2"></i>Nuevo Servicio';
-}
-
-async function prepararEdicionServicio(id) {
-    const s = await db.servicios.get(id);
-    if (!s) return;
-    document.getElementById('edit_ser_id').value = s.id;
-    document.getElementById('sNom').value = s.nombre;
-    document.getElementById('sPre').value = s.coste;
-    document.getElementById('modalServicioTitulo').innerHTML = '<i class="fa-solid fa-pen-to-square me-2"></i>Editar Servicio';
-    new bootstrap.Modal(document.getElementById('modalNuevoServicio')).show();
-}
-
 async function guardarServicio() {
-    const id = document.getElementById('edit_ser_id').value;
-    const nombre = document.getElementById('sNom').value;
-    const precio = document.getElementById('sPre').value;
+    const modalEl = document.getElementById('modalServicio');
+    const id = modalEl.getAttribute('data-edit-id');
+    
+    const datos = {
+        nombre: document.getElementById('serNom').value,
+        coste: parseFloat(document.getElementById('serCos').value)
+    };
 
-    if (!nombre || !precio) return alert("Nombre y precio son obligatorios");
-    const datos = { nombre, coste: precio };
+    if (!datos.nombre || isNaN(datos.coste)) {
+        alert("Por favor, completa nombre y precio.");
+        return;
+    }
 
-    if (id) await db.servicios.update(parseInt(id), datos);
-    else await db.servicios.add(datos);
+    if (id) {
+        await db.servicios.update(parseInt(id), datos);
+    } else {
+        await db.servicios.add(datos);
+    }
 
-    bootstrap.Modal.getInstance(document.getElementById('modalNuevoServicio')).hide();
+    // Limpieza y refresco
+    modalEl.removeAttribute('data-edit-id');
+    modalEl.querySelector('.modal-title').innerText = "Nuevo Servicio";
+    document.getElementById('serNom').value = '';
+    document.getElementById('serCos').value = '';
+    
+    bootstrap.Modal.getInstance(modalEl).hide();
     listarServicios();
-    actualizarSelectores();
+    if(typeof actualizarSelectores === 'function') actualizarSelectores();
 }
 
 async function eliminarServicio(id) {
     if (confirm("¿Seguro que quieres eliminar este servicio?")) {
         await db.servicios.delete(id);
         listarServicios();
-        actualizarSelectores();
+        if(typeof actualizarSelectores === 'function') actualizarSelectores();
     }
 }
 
-// 7. UTILIDADES
-async function actualizarSelectores() {
-    const clis = await db.clientas.orderBy('nombre').toArray();
+function abrirModalNuevoServicio() {
+    const modalEl = document.getElementById('modalServicio');
+    if (!modalEl) return;
+
+    // 1. Limpiamos el ID de edición
+    modalEl.removeAttribute('data-edit-id');
+    
+    // 2. Reseteamos el título
+    modalEl.querySelector('.modal-title').innerText = "Nuevo Servicio";
+    
+    // 3. Vaciamos los inputs
+    document.getElementById('serNom').value = '';
+    document.getElementById('serCos').value = '';
+
+    // 4. Ocultamos el botón de eliminar (porque es un servicio nuevo)
+    const btnEliminar = document.getElementById('btnEliminarServicio');
+    if (btnEliminar) btnEliminar.style.display = 'none';
+    // ------------------------
+    
+    // 5. Lo abrimos manualmente
+    const modalInstance = new bootstrap.Modal(modalEl);
+    modalInstance.show();
+}
+
+async function listarServicios() {
     const sers = await db.servicios.toArray();
+    const contenedor = document.getElementById('listaServicios');
+    if (!contenedor) return;
+
+    contenedor.innerHTML = sers.map(s => `
+        <div class="col-md-3 mb-3">
+            <div class="list-group-item card-servicio-lujo" 
+                 onclick="prepararEdicionServicio(${s.id})" 
+                 style="cursor: pointer;">
+                <h6 class="fw-bold">${s.nombre}</h6>
+                <div class="text-gold h4">${s.coste}€</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function prepararEdicionServicio(id) {
+    const s = await db.servicios.get(parseInt(id));
+    if (!s) return;
+
+    const modalEl = document.getElementById('modalServicio');
+    document.getElementById('serNom').value = s.nombre;
+    document.getElementById('serCos').value = s.coste;
+
+    // 1. Guardamos el ID en el modal para saber que estamos editando
+    modalEl.setAttribute('data-edit-id', id);
+    modalEl.querySelector('.modal-title').innerText = "Editar Servicio";
+
+    // --- NUEVA LÍNEA AQUÍ ---
+    // 2. MOSTRAMOS el botón de eliminar (porque estamos editando uno existente)
+    const btnEliminar = document.getElementById('btnEliminarServicio');
+    if (btnEliminar) btnEliminar.style.display = 'block';
+    // ------------------------
+
+    new bootstrap.Modal(modalEl).show();
+}
+
+async function ejecutarEliminarServicio() {
+    const modalEl = document.getElementById('modalServicio');
+    const id = modalEl.getAttribute('data-edit-id');
+
+    if (id && confirm("¿Estás segura de que quieres eliminar este servicio definitivamente?")) {
+        await db.servicios.delete(parseInt(id));
+        
+        // Cerramos modal y refrescamos todo
+        bootstrap.Modal.getInstance(modalEl).hide();
+        listarServicios();
+        if(typeof actualizarSelectores === 'function') actualizarSelectores();
+    }
+}
+
+async function actualizarSelectores() {
+    const clis = await db.clientas.toArray();
+    const sers = await db.servicios.toArray();
+    
     const selCli = document.getElementById('selCli');
     const selSer = document.getElementById('selSer');
     
-    if (selCli) selCli.innerHTML = clis.map(c => `<option value="${c.id}">${c.nombre} ${c.apellidos}</option>`).join('');
-    if (selSer) selSer.innerHTML = sers.map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
+    if(selCli) selCli.innerHTML = clis.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+    if(selSer) selSer.innerHTML = sers.map(s => `<option value="${s.id}">${s.nombre} (${s.coste}€)</option>`).join('');
 }
 
-async function descargarBackup() {
-    const data = { 
-        clientas: await db.clientas.toArray(), 
-        agenda: await db.agenda.toArray(), 
-        servicios: await db.servicios.toArray() 
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `Backup_Salon_EliGR.json`;
-    link.click();
+async function forzarDesbloqueo() {
+    const id = document.getElementById('modalCita').getAttribute('data-edit-id');
+    if (confirm("Esta cita parece bloqueada. ¿Quieres desbloquearla para poder editarla o borrarla?")) {
+        await db.agenda.update(parseInt(id), { cobrado: false });
+        
+        // Cerramos el modal y refrescamos
+        bootstrap.Modal.getInstance(document.getElementById('modalCita')).hide();
+        calendar.refetchEvents();
+        alert("Cita desbloqueada. Ya puedes gestionarla normalmente.");
+    }
 }
