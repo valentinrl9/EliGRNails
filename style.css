@@ -1,0 +1,215 @@
+/* =========================================
+   VARIABLES Y BASE
+   ========================================= */
+:root {
+    --nude-rosa: #e69c9c;
+    --nude-rosa-glass: rgba(230, 156, 156, 0.85);
+    --dorado: #c5a059;
+    --negro-suave: #1a1a1a;
+    --blanco-fondo: #fffaf9;
+}
+
+body {
+    background-color: var(--nude-rosa);
+    font-family: 'Poppins', sans-serif;
+    color: var(--negro-suave);
+    margin: 0;
+    padding: 0;
+}
+
+/* =========================================
+   NAVBAR (CONTROL ESTRICTO DE TAMAÑO)
+   ========================================= */
+.navbar {
+    background-color: var(--negro-suave) !important;
+    border-bottom: 2px solid var(--dorado);
+    height: 80px !important; /* Altura fija para evitar saltos */
+    padding: 0 1rem !important;
+    display: flex;
+    align-items: center;
+}
+
+.navbar-brand {
+    display: flex;
+    align-items: center;
+    padding: 0;
+}
+
+.navbar-brand img {
+    height: 55px !important; /* Ajuste fijo para el logo */
+    width: auto !important;
+    object-fit: contain;
+}
+
+.navbar-brand span {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.3rem;
+    margin-left: 10px;
+    letter-spacing: 2px;
+    background: linear-gradient(to right, #bf953f, #fcf6ba, #b38728);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.btn-nav {
+    color: #ffffff !important;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 8px 15px !important;
+    border-radius: 8px !important;
+    transition: 0.3s;
+}
+
+.btn-nav.active {
+    background-color: var(--dorado) !important;
+    color: var(--negro-suave) !important;
+    font-weight: bold;
+    box-shadow: 0 4px 10px rgba(197, 160, 89, 0.4);
+}
+
+/* =========================================
+   FORMULARIOS Y MODALES
+   ========================================= */
+.label-custom {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #666;
+    margin-bottom: 3px;
+}
+
+.form-control, .form-select {
+    border: 1px solid #eee;
+    border-radius: 10px;
+    padding: 10px;
+}
+
+.form-control:focus {
+    border-color: var(--nude-rosa);
+    box-shadow: 0 0 0 0.2rem rgba(212, 140, 140, 0.25);
+}
+
+.modal-content {
+    border-radius: 20px;
+    border: none;
+    overflow: hidden;
+}
+
+/* =========================================
+   CALENDARIO (ESTILO PREMIUM)
+   ========================================= */
+#calendario {
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.fc-header-toolbar {
+    padding: 20px !important;
+    margin-bottom: 0 !important;
+}
+
+.fc-button-primary {
+    background-color: var(--negro-suave) !important;
+    border-color: var(--dorado) !important;
+    color: var(--dorado) !important;
+}
+
+.fc-button-active {
+    background-color: var(--dorado) !important;
+    color: white !important;
+}
+
+/* Cabeceras de los días */
+.fc-theme-standard .fc-col-header-cell {
+    background-color: var(--negro-suave);
+    border-bottom: 2px solid var(--dorado) !important;
+}
+
+.fc-col-header-cell-cushion {
+    text-transform: capitalize;
+    color: var(--dorado) !important;
+    font-weight: 700;
+    text-decoration: none !important;
+    padding: 12px 0 !important;
+    letter-spacing: 1px;
+}
+
+/* =========================================
+   CITAS: GLASSMORPHISM (OPCIÓN 3)
+   ========================================= */
+.fc-v-event {
+    background: var(--nude-rosa-glass) !important;
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+    border: none !important;
+    border-left: 5px solid var(--dorado) !important; /* Pestaña lateral dorada */
+    border-radius: 8px !important;
+    padding: 5px !important;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+}
+
+.fc-event-main {
+    color: var(--negro-suave) !important;
+    font-weight: 600;
+}
+
+/* =========================================
+   COLUMNA DE HORAS (ANCHO CONTROLADO)
+   ========================================= */
+.fc .fc-timegrid-axis, 
+.fc .fc-timegrid-slot-label,
+.fc .fc-timegrid-axis-frame {
+    width: 95px !important;
+    min-width: 95px !important;
+    max-width: 95px !important;
+}
+
+.fc .fc-timegrid-slot-label-cushion {
+    width: 100% !important;
+    text-align: center !important;
+    display: block !important;
+    color: var(--negro-suave);
+    font-weight: 600;
+    text-decoration: none !important;
+}
+
+/* Cuadrícula interna */
+.fc-theme-standard td, .fc-theme-standard th {
+    border: 1px solid rgba(197, 160, 89, 0.1) !important;
+}
+
+.fc-timegrid-now-indicator-line {
+    border-color: var(--dorado) !important;
+    border-width: 2px !important;
+}
+
+/* =========================================
+   CURSORES (LÁPIZ DORADO)
+   ========================================= */
+.fc-timegrid-slot {
+    cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="%23c5a059"><path d="M7.127 22.564l-7.127 1.436 1.436-7.127 12.333-12.333 5.691 5.691-12.333 12.333zm9.332-21.821l-10.32 10.319 3.09 3.09 10.319-10.32-3.089-3.089zm4.234 4.162l-3.09-3.09 1.407-1.407c.517-.517 1.357-.517 1.875 0l1.215 1.215c.517.517.517 1.357 0 1.875l-1.407 1.407z"/></svg>') 0 22, crosshair !important;
+}
+
+.fc-event, .fc-button, .btn, .fc-col-header-cell-cushion {
+    cursor: pointer !important;
+}
+
+.fc-event:hover {
+    filter: brightness(0.9);
+    transform: scale(1.02);
+    transition: 0.2s ease;
+}
+
+/* =========================================
+   LISTAS DE CLIENTES Y SERVICIOS
+   ========================================= */
+.list-group-item {
+    border: none;
+    margin-bottom: 8px;
+    border-radius: 12px !important;
+    background: white;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+    border-left: 4px solid var(--nude-rosa) !important;
+}
