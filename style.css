@@ -122,11 +122,25 @@ body {
     color: var(--negro-suave) !important;
     font-weight: 600;
     padding: 5px !important;
-}
+}   
 
 /* Cursor Personalizado (Lápiz) */
 .fc-timegrid-slot {
     cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="%23c5a059"><path d="M7.127 22.564l-7.127 1.436 1.436-7.127 12.333-12.333 5.691 5.691-12.333 12.333zm9.332-21.821l-10.32 10.319 3.09 3.09 10.319-10.32-3.089-3.089zm4.234 4.162l-3.09-3.09 1.407-1.407c.517-.517 1.357-.517 1.875 0l1.215 1.215c.517.517.517 1.357 0 1.875l-1.407 1.407z"/></svg>') 0 22, crosshair !important;
+}
+
+/* Recuperar el cursor de mano en las citas de la agenda */
+.fc-event, 
+.fc-daygrid-event, 
+.fc-timegrid-event {
+    cursor: pointer !important;
+}
+
+/* Opcional: un ligero efecto visual al pasar el ratón */
+.fc-event:hover {
+    filter: brightness(1.1);
+    transform: scale(1.01);
+    transition: all 0.2s ease;
 }
 
 /* =========================================
