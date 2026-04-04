@@ -635,3 +635,61 @@ async function forzarDesbloqueo() {
         alert("Cita desbloqueada. Ya puedes gestionarla normalmente.");
     }
 }
+
+ // COPIA DE SEGURIDAD
+ async function exportarBackup() {
+    try {
+        // 1. Extraemos todas las tablas de tu BD versión 2
+        const [clientas, servicios, agenda, ventas] = await Promise.all([
+            db.clientas.toArray(),
+            db.servicios.toArray(),
+            db.agenda.toArray(),
+            db.ventas.toArray()
+        ]);
+        
+        // 2. Estructuramos el objeto de respaldo
+        const backupData = {
+            info: {
+                fecha: new Date().toLocaleString(),
+                dispositivo: navigator.userAgent,
+                totalRegistros: clientas.length + servicios.length + agenda.length + ventas.length
+            },
+            tablas: {
+                clientas: clientas,
+                servicios: servicios,
+                agenda: agenda,
+                ventas: ventas
+            }
+        };
+
+        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+        const fechaISO = new Date().toISOString().slice(0, 10);
+        const nombreArchivo = `eli_backup_total_${fechaISO}.json`;
+
+        // 3. Lógica de compartir (Móvil/Tablet) o Descargar (PC)
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], nombreArchivo, { type: 'application/json' })] })) {
+            const archivo = new File([blob], nombreArchivo, { type: 'application/json' });
+            await navigator.share({
+                title: 'Copia Seguridad Peluquería',
+                text: `Backup completo: ${clientas.length} clientas, ${ventas.length} ventas y ${agenda.length} citas.`,
+                files: [archivo]
+            });
+        } else {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = nombreArchivo;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            console.log("Descarga local completada.");
+        }
+
+    } catch (error) {
+        console.error("Error crítico en el backup:", error);
+        if (error.name !== 'AbortError') {
+            alert("Error al generar la copia. Revisa la consola.");
+        }
+    }
+}

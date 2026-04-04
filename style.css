@@ -379,3 +379,25 @@ body {
     position: relative;
     z-index: 1;
 }
+
+/* BOTON DE COPIA DE SEGURIDAD */
+.btn-outline-gold {
+    color: #d4af37;
+    border-color: #d4af37;
+    background-color: transparent;
+    transition: all 0.3s ease;
+}
+
+.btn-outline-gold:hover {
+    background-color: #d4af37;
+    color: #000;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(212, 175, 55, 0.3);
+}
+
+/* Ajuste para móviles: que no se pegue al borde */
+@media (max-width: 768px) {
+    .btn-outline-gold {
+        margin-right: 10px;
+    }
+}
