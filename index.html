@@ -43,8 +43,13 @@
             </ul>
         </div>
     </div>
-    <button onclick="exportarBackup()" class="btn btn-sm btn-outline-gold ms-auto shadow-sm" title="Copia de Seguridad">
+
+    <input type="file" id="importFileNavbar" accept=".json" style="display: none;" onchange="importarBackup(event)">
+    <button onclick="exportarBackup()" class="btn btn-sm btn-outline-gold ms-2 shadow-sm" title="Guardar Copia de Seguridad">
         <i class="fa-solid fa-cloud-arrow-down"></i>
+    </button>
+    <button onclick="document.getElementById('importFileNavbar').click()" class="btn btn-sm btn-outline-gold ms-2 shadow-sm" title="Restaurar Copia de Seguridad">
+        <i class="fa-solid fa-cloud-arrow-up"></i>
     </button>
 </nav>
 

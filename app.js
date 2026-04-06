@@ -693,3 +693,49 @@ async function forzarDesbloqueo() {
         }
     }
 }
+
+// RESTAURAR COPIA DE SEGURIDAD EXTERNA
+async function importarBackup(event) {
+    const archivo = event.target.files[0];
+    if (!archivo) return;
+
+    // Confirmación de seguridad
+    const confirmar = confirm("¿Estás segura? Esto reemplazará todos los datos actuales de la tablet por los del archivo.");
+    if (!confirmar) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        try {
+            const contenido = JSON.parse(e.target.result);
+            
+            // Validamos que el archivo tenga la estructura correcta
+            if (!contenido.tablas) {
+                throw new Error("El archivo no parece ser un backup válido.");
+            }
+
+            // 1. Limpiamos las tablas actuales para evitar duplicados
+            await Promise.all([
+                db.clientas.clear(),
+                db.servicios.clear(),
+                db.agenda.clear(),
+                db.ventas.clear()
+            ]);
+
+            // 2. Insertamos los datos del archivo
+            await Promise.all([
+                db.clientas.bulkAdd(contenido.tablas.clientas),
+                db.servicios.bulkAdd(contenido.tablas.servicios),
+                db.agenda.bulkAdd(contenido.tablas.agenda),
+                db.ventas.bulkAdd(contenido.tablas.ventas)
+            ]);
+
+            alert("¡Éxito! Datos restaurados correctamente. La página se recargará ahora.");
+            location.reload(); // Recargamos para que la agenda y listas se actualicen
+
+        } catch (error) {
+            console.error("Error al importar:", error);
+            alert("Error: El archivo está dañado o no es compatible.");
+        }
+    };
+    reader.readAsText(archivo);
+}
