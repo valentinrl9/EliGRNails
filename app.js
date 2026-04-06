@@ -29,9 +29,6 @@ document.addEventListener('DOMContentLoaded', () => {
     actualizarSelectores();
 });
 
-// =========================================
-// 3. LÓGICA DEL CALENDARIO (FullCalendar)
-// =========================================
 function initCalendar() {
     const calendarEl = document.getElementById('calendario');
     if (!calendarEl) return;
@@ -48,11 +45,8 @@ function initCalendar() {
         slotLabelInterval: "00:30",
         defaultTimedEventDuration: '01:30:00',
         slotLabelFormat: {
-            hour: '2-digit',
-            minute: '2-digit',
-            omitZeroMinute: false, // Esto fuerza el :00
-            meridiem: false,
-            hour12: false // Formato 24h
+            hour: '2-digit', minute: '2-digit',
+            omitZeroMinute: false, meridiem: false, hour12: false
         },
         headerToolbar: {
             left: 'prev,next today',
@@ -60,35 +54,19 @@ function initCalendar() {
             right: 'timeGridWeek,timeGridDay'
         },
 
-        // Click en hueco vacío (Nueva Cita)
         dateClick: function(info) {
             const modalEl = document.getElementById('modalCita');
-            
-            // 1. Limpiamos el ID de edición (esto indica que es NUEVA cita)
             modalEl.removeAttribute('data-edit-id');
             
-            // 2. DESBLOQUEAMOS todos los campos y botones (IMPORTANTE)
             const inputs = modalEl.querySelectorAll('input, select');
-            inputs.forEach(i => i.disabled = false); // Volver a habilitar
+            inputs.forEach(i => i.disabled = false);
             
-            const btnGuardar = modalEl.querySelector('button[onclick="agendarCita()"]');
-            const btnEliminar = document.getElementById('btnEliminarCita');
-            const btnCobrar = document.getElementById('btnCobrarCita');
-
-            // 3. Restauramos la visualización original
             document.getElementById('modalCitaTitulo').innerText = "Nueva Cita";
-            btnGuardar.style.display = 'block';
-            btnEliminar.style.display = 'none'; // No se puede eliminar algo que no existe
-            btnCobrar.style.display = 'none';   // No se puede cobrar algo que no existe
-            
-            // Restaurar estilo del botón cobrar por si venía de una cita bloqueada
-            btnCobrar.disabled = false;
-            btnCobrar.classList.replace('btn-secondary', 'btn-success');
-            btnCobrar.innerHTML = '<i class="fa-solid fa-cash-register me-2"></i> FINALIZAR Y COBRAR';
+            document.getElementById('btnEliminarCita').style.display = 'none';
+            document.getElementById('btnCobrarCita').style.display = 'none';
+            document.querySelector('button[onclick="agendarCita()"]').style.display = 'block';
 
-            // 4. Seteamos la fecha (con el redondeo de 15 min que ya tenías)
             let fecha = new Date(info.date);
-            fecha.setMinutes(Math.round(fecha.getMinutes() / 15) * 15);
             const tzoffset = (new Date()).getTimezoneOffset() * 60000;
             const localISOTime = (new Date(fecha - tzoffset)).toISOString().slice(0, 16);
             document.getElementById('citaFecha').value = localISOTime;
@@ -96,42 +74,47 @@ function initCalendar() {
             new bootstrap.Modal(modalEl).show();
         },
 
-        // Click en cita existente (Editar/Cobrar)
         eventClick: function(info) {
             if (info.event && info.event.id) {
                 prepararEdicionCita(info.event.id);
             }
         },
 
-        // Carga de eventos desde Dexie
-        // Dentro de initCalendar -> events:
-        events: async function(info, successCallback) {
-            const citas = await db.agenda.toArray();
-            const eventos = await Promise.all(citas.map(async (c) => {
-                const cli = await db.clientas.get(c.clienteId);
-                const ser = await db.servicios.get(c.servicioId);
-                const isCobrado = (c.cobrado === true || c.cobrado === "true");
-                
-                // Si está cobrada, añadimos el check y cambiamos estilo
-                const titulo = c.cobrado ? `✅ ${cli.nombre}` : `${cli ? cli.nombre : 'S/N'}`;
-                const colorFondo = c.cobrado ? '#d1d1d1' : '#e69c9c'; // Gris si está cobrada
-                const colorBorde = c.cobrado ? '#bc9c59' : '#c5a059';
+        events: async function(info, successCallback, failureCallback) {
+            try {
+                const citas = await db.agenda.toArray();
+                const eventos = await Promise.all(citas.map(async (c) => {
+                    // Buscamos clienta y servicio, con plan B si no existen
+                    const cli = await db.clientas.get(parseInt(c.clienteId)) || { nombre: "Clienta borrada" };
+                    const ser = await db.servicios.get(parseInt(c.servicioId)) || { nombre: "" };
+                    
+                    const isCobrado = (c.cobrado === true || c.cobrado === "true");
+                    
+                    // Definimos textos y colores
+                    const icono = isCobrado ? '✅ ' : '';
+                    const colorFondo = isCobrado ? '#444444' : '#e69c9c'; // Gris oscuro si está cobrada
+                    const colorTexto = isCobrado ? '#aaa' : '#1a1a1a';
 
-                return {
-                    id: c.id,
-                    title: `${titulo} - ${ser ? ser.nombre : ''}`,
-                    start: c.fecha,
-                    backgroundColor: colorFondo,
-                    borderColor: colorBorde,
-                    textColor: c.cobrado ? '#777' : '#1a1a1a',
-                    extendedProps: { cobrado: c.cobrado } // Pasamos esta info para el bloqueo
-                };
-            }));
-            successCallback(eventos);
+                    return {
+                        id: c.id,
+                        title: `${icono}${cli.nombre} - ${ser.nombre}`,
+                        start: c.fecha,
+                        backgroundColor: colorFondo,
+                        borderColor: isCobrado ? '#222' : '#c5a059',
+                        textColor: colorTexto,
+                        extendedProps: { cobrado: isCobrado }
+                    };
+                }));
+                successCallback(eventos);
+            } catch (error) {
+                console.error("Error cargando eventos:", error);
+                failureCallback(error);
+            }
         }
     });
     calendar.render();
 }
+
 
 // =========================================
 // 4. GESTIÓN DE CITAS
