@@ -648,9 +648,10 @@ async function forzarDesbloqueo() {
         ]);
         
         // 2. Estructuramos el objeto de respaldo
+        const ahora = new Date();
         const backupData = {
             info: {
-                fecha: new Date().toLocaleString(),
+                fecha: ahora.toLocaleString(),
                 dispositivo: navigator.userAgent,
                 totalRegistros: clientas.length + servicios.length + agenda.length + ventas.length
             },
@@ -663,15 +664,21 @@ async function forzarDesbloqueo() {
         };
 
         const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-        const fechaISO = new Date().toISOString().slice(0, 10);
-        const nombreArchivo = `eli_backup_total_${fechaISO}.json`;
+
+        // --- NUEVA LÓGICA DE NOMBRE CON HORA ---
+        const fecha = ahora.toISOString().slice(0, 10); // YYYY-MM-DD
+        const horas = ahora.getHours().toString().padStart(2, '0');
+        const minutos = ahora.getMinutes().toString().padStart(2, '0');
+        
+        const nombreArchivo = `eli_backup_${fecha}_${horas}-${minutos}.json`;
+        // ---------------------------------------
 
         // 3. Lógica de compartir (Móvil/Tablet) o Descargar (PC)
         if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], nombreArchivo, { type: 'application/json' })] })) {
             const archivo = new File([blob], nombreArchivo, { type: 'application/json' });
             await navigator.share({
                 title: 'Copia Seguridad Peluquería',
-                text: `Backup completo: ${clientas.length} clientas, ${ventas.length} ventas y ${agenda.length} citas.`,
+                text: `Backup completo (${ahora.toLocaleString()})`,
                 files: [archivo]
             });
         } else {
@@ -683,7 +690,7 @@ async function forzarDesbloqueo() {
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            console.log("Descarga local completada.");
+            console.log("Descarga local completada: " + nombreArchivo);
         }
 
     } catch (error) {
