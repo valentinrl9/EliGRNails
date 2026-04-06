@@ -16,8 +16,48 @@ db.version(3).stores({
     });
 });
 
+// Función para calcular cuántas sesiones lleva una clienta
+async function obtenerEstadoFidelidad(clienteId) {
+    try {
+        // 1. Convertimos el ID a número para evitar errores de búsqueda
+        const idBusqueda = parseInt(clienteId);
+        
+        // 2. Buscamos ventas que coincidan con la clienta Y que tengan importe mayor a 0
+        // Las sesiones gratis (0€) no computan para el siguiente regalo.
+        const ventasPagadas = await db.ventas
+            .where('clienteId')
+            .equals(idBusqueda)
+            .filter(v => v.importe > 0) 
+            .toArray();
+        
+        const totalPagadas = ventasPagadas.length;
+        
+        // 3. Calculamos el progreso actual (ciclos de 10)
+        let actual = totalPagadas % 10;
+        let tocaRegalo = false;
+
+        // 4. Si ha llegado a 10, 20, 30... el resto es 0, pero marcamos 10 y aviso de regalo
+        if (totalPagadas > 0 && actual === 0) {
+            actual = 10;
+            tocaRegalo = true;
+        }
+
+        return {
+            actual: actual,           // Puntos actuales pagados (0-10)
+            porcentaje: actual * 10,  // Ancho de la barra
+            tocaRegalo: tocaRegalo    // Indica si la siguiente sesión es el regalo
+        };
+    } catch (e) {
+        console.error("Error al calcular fidelidad:", e);
+        return { actual: 0, porcentaje: 0, tocaRegalo: false };
+    }
+}
+
+
 let calendar;
 let citaParaCobrar = null;
+
+
 
 // =========================================
 // 2. INICIALIZACIÓN AL CARGAR LA PÁGINA
@@ -249,57 +289,92 @@ async function iniciarCobro() {
 
 // Al confirmar, guardamos el valor que haya en el input (el editado)
 async function confirmarCobro() {
-    const importeFinal = parseFloat(document.getElementById('inputImporteFinal').value);
+    const importeInput = document.getElementById('inputImporteFinal').value;
+    const importeFinal = parseFloat(importeInput);
     const metodo = document.getElementById('metodoPago').value;
 
     if (isNaN(importeFinal) || importeFinal < 0) {
         alert("Por favor, introduce un importe válido.");
         return;
     }
-    await db.ventas.add({
-        citaId: citaParaCobrar.id, // <--- Añadimos esto
-        clienteId: citaParaCobrar.clienteId,
-        servicioId: citaParaCobrar.servicioId,
-        fecha: new Date().toISOString(),
-        importe: importeFinal,
-        metodoPago: metodo
-    });
 
-    await db.agenda.update(citaParaCobrar.id, { cobrado: true });
-    
-    calendar.refetchEvents();
-    bootstrap.Modal.getInstance(document.getElementById('modalCobro')).hide();
-    
-    // Si tienes abierta la pestaña de ventas, la actualizamos
-    if(typeof cargarHistorialVentas === 'function') cargarHistorialVentas();
-    alert(`Venta registrada: ${importeFinal}€`);
+    try {
+        // 1. Guardamos la venta asegurando IDs numéricos
+        // Si importeFinal es 0, la función obtenerEstadoFidelidad lo ignorará automáticamente
+        await db.ventas.add({
+            citaId: parseInt(citaParaCobrar.id), 
+            clienteId: parseInt(citaParaCobrar.clienteId),
+            servicioId: parseInt(citaParaCobrar.servicioId),
+            fecha: new Date().toISOString(),
+            importe: importeFinal,
+            metodoPago: metodo
+        });
+
+        // 2. Marcamos la cita como cobrada
+        await db.agenda.update(parseInt(citaParaCobrar.id), { cobrado: true });
+        
+        // 3. Actualizamos el calendario
+        if (calendar) calendar.refetchEvents();
+        
+        // 4. Cerramos el modal
+        const modalCobroEl = document.getElementById('modalCobro');
+        const modalInstance = bootstrap.Modal.getInstance(modalCobroEl);
+        if (modalInstance) modalInstance.hide();
+        
+        // 5. Actualizamos el historial de ventas si existe la función
+        if (typeof cargarHistorialVentas === 'function') {
+            await cargarHistorialVentas();
+        }
+
+        // 6. ACTUALIZACIÓN CRÍTICA: Refrescamos la lista de clientas 
+        // para que la barra de progreso suba (o no, si el cobro fue 0€)
+        if (typeof listarClientas === 'function') {
+            await listarClientas();
+        }
+
+        alert(importeFinal === 0 ? "Sesión de regalo registrada correctamente." : `Venta registrada: ${importeFinal}€`);
+
+    } catch (error) {
+        console.error("Error al procesar el cobro:", error);
+        alert("Hubo un error al registrar la venta.");
+    }
 }
 
+
 async function revertirCobro(ventaId, citaId) {
-    if (!confirm("¿Segura que quieres anular este cobro? La cita volverá a estar pendiente.")) return;
+    if (!confirm("¿Segura que quieres anular este cobro? La cita volverá a estar pendiente y el progreso de la clienta se actualizará.")) return;
 
     try {
         // 1. Eliminamos el registro de la venta
+        // Al borrar la venta, el 'motor' dejará de contarla automáticamente
         await db.ventas.delete(parseInt(ventaId));
 
-        // 2. IMPORTANTE: Cambiamos el estado en la agenda
-        // Usamos parseInt para asegurar que el ID es numérico
-        await db.agenda.update(parseInt(citaId), { cobrado: false });
+        // 2. IMPORTANTE: Cambiamos el estado en la agenda a pendiente (cobrado: false)
+        if (citaId) {
+            await db.agenda.update(parseInt(citaId), { cobrado: false });
+        }
 
-        // 3. Forzamos la actualización de la interfaz
-        alert("Cobro anulado. La cita vuelve a estar pendiente.");
+        // 3. Refrescar la tabla de historial de ventas
+        if (typeof cargarHistorialVentas === 'function') {
+            await cargarHistorialVentas();
+        }
         
-        // Refrescar tabla de ventas
-        await cargarHistorialVentas();
-        
-        // Refrescar calendario
-        if (calendar) {
+        // 4. Refrescar el calendario para que la cita pierda el color de "cobrada"
+        if (typeof calendar !== 'undefined' && calendar) {
             calendar.refetchEvents();
         }
 
+        // 5. ACTUALIZACIÓN DE BARRA: Refrescamos la lista de clientas
+        // Como la venta ya no existe (o el importe > 0 ya no está), la barra bajará sola
+        if (typeof listarClientas === 'function') {
+            await listarClientas();
+        }
+
+        alert("Cobro anulado correctamente. Se ha actualizado el historial y la fidelidad.");
+
     } catch (error) {
-        console.error("Error al revertir:", error);
-        alert("No se pudo anular el cobro.");
+        console.error("Error al revertir el cobro:", error);
+        alert("No se pudo anular el cobro. Revisa la consola para más detalles.");
     }
 }
 
@@ -409,7 +484,10 @@ async function guardarClienta() {
 
         // Refrescar la interfaz
         listarClientas();
-        if (typeof actualizarSelectores === "function") actualizarSelectores();
+        if (typeof actualizarSelectores === "function"){
+            await listarClientas();
+        } 
+        actualizarSelectores();
         
         // Cerrar modal y limpiar
         const modalInstance = bootstrap.Modal.getInstance(modalEl);
@@ -428,6 +506,10 @@ async function prepararEdicionClienta(id) {
     // 1. Buscamos la clienta en la base de datos
     const c = await db.clientas.get(parseInt(id));
     if (!c) return;
+
+    // --- NUEVO: Obtenemos el estado de fidelidad para mostrarlo en el modal ---
+    const estado = await obtenerEstadoFidelidad(id);
+    // -------------------------------------------------------------------------
 
     const modalEl = document.getElementById('modalClienta');
 
@@ -455,10 +537,31 @@ async function prepararEdicionClienta(id) {
     modalEl.querySelector('.modal-title').innerText = "Editar Ficha de Clienta";
     modalEl.setAttribute('data-edit-id', id);
 
+    // --- OPCIONAL: Si quieres mostrar los puntos dentro del modal ---
+    // Si tienes un div con id="infoFidelidadModal" en tu HTML, podrías hacer:
+    const contenedorPuntos = document.getElementById('infoFidelidadModal');
+    if (contenedorPuntos) {
+        contenedorPuntos.innerHTML = `
+            <div class="alert alert-dark border-gold mb-3">
+                <div class="d-flex justify-content-between mb-1">
+                    <span class="small fw-bold text-gold">SESIONES ACUMULADAS: ${estado.actual}/10</span>
+                    ${estado.tocaRegalo ? '<span class="badge bg-warning text-dark">¡REGALO LISTO!</span>' : ''}
+                </div>
+                <div class="progress" style="height: 10px; background-color: #444;">
+                    <div class="progress-bar bg-gold" style="width: ${estado.porcentaje}%"></div>
+                </div>
+            </div>
+        `;
+    }
+
     // 5. Mostramos el modal
     const modalInstance = new bootstrap.Modal(modalEl);
     modalInstance.show();
-    actualizarSugerenciasLocalidad(); // <--- Añade esto
+    
+    // Si tienes esta función para el autocompletado:
+    if (typeof actualizarSugerenciasLocalidad === 'function') {
+        actualizarSugerenciasLocalidad();
+    }
 }
 
 async function listarClientas() {
@@ -466,26 +569,76 @@ async function listarClientas() {
     const contenedor = document.getElementById('listaClientes');
     if (!contenedor) return;
 
-    // Ordenar alfabéticamente por nombre
+    // 1. Ordenar alfabéticamente por nombre
     clis.sort((a, b) => a.nombre.localeCompare(b.nombre));
 
-    contenedor.innerHTML = clis.map(c => `
-        <div class="col-md-4 mb-3">
-            <div class="list-group-item p-3 shadow-sm border-gold bg-dark text-white h-100" 
-                 onclick="prepararEdicionClienta(${c.id})" 
-                 style="cursor: pointer; border-left: 4px solid #d4af37;">
-                <div class="d-flex justify-content-between align-items-start">
-                    <h6 class="mb-1 fw-bold text-gold">${c.nombre}</h6>
-                    ${c.fechaNacimiento ? `<small class="text-muted"><i class="fa-solid fa-cake-candles"></i> ${c.fechaNacimiento}</small>` : ''}
-                </div>
-                <p class="mb-0 small" style="color: #e0e0e0;">
-                    <i class="fa-solid fa-phone me-2 text-gold"></i>${c.telefono || 'Sin teléfono'}
-                </p>
-            </div>
-        </div>
-    `).join('');
-}
+    // 2. Mapeamos las clientas creando una promesa por cada una
+    const htmlPromesas = clis.map(async (c) => {
+        const idLimpio = parseInt(c.id);
+        
+        // Obtenemos el estado de fidelidad
+        const estado = await obtenerEstadoFidelidad(idLimpio);
+        
+        // Calculamos el historial total acumulado (solo las pagadas)
+        const ventasPagadas = await db.ventas
+            .where('clienteId')
+            .equals(idLimpio)
+            .filter(v => v.importe > 0)
+            .toArray();
+        const totalHistorico = ventasPagadas.length;
 
+        return `
+            <div class="col-md-4 mb-3">
+                <div class="list-group-item p-3 shadow-sm border-gold bg-dark text-white h-100" 
+                     onclick="prepararEdicionClienta(${idLimpio})" 
+                     style="cursor: pointer; border-left: 4px solid #d4af37; border-radius: 8px;">
+                    
+                    <div class="d-flex justify-content-between align-items-start">
+                        <h6 class="mb-1 fw-bold text-gold">${c.nombre}</h6>
+                        ${c.fechaNacimiento ? `<small class="text-muted"><i class="fa-solid fa-cake-candles"></i> ${c.fechaNacimiento}</small>` : ''}
+                    </div>
+                    
+                    <p class="mb-2 small" style="color: #e0e0e0;">
+                        <i class="fa-solid fa-phone me-2 text-gold"></i>${c.telefono || 'Sin teléfono'}
+                    </p>
+
+                    <div class="mt-3 pt-2" style="border-top: 1px solid #444;">
+                        <div class="d-flex justify-content-between mb-1 align-items-end">
+                            <div class="d-flex flex-column">
+                                <span class="fw-bold" style="font-size: 0.8rem; color: #f8f9fa; letter-spacing: 0.5px; line-height: 1.2;">
+                                    PUNTOS: ${estado.actual}/10
+                                </span>
+                                <span style="font-size: 0.7rem; color: #b0b0b0; margin-top: 2px;">
+                                    Total pagadas: ${totalHistorico}
+                                </span>
+                            </div>
+                            
+                            ${estado.tocaRegalo ? `
+                                <div class="text-end">
+                                    <span class="text-warning fw-bold" style="font-size: 0.8rem;">
+                                        <i class="fa-solid fa-crown me-1"></i>¡REGALO!
+                                    </span>
+                                </div>
+                            ` : ''}
+                        </div>
+                        
+                        <div style="width: 100%; background: #1a1a1a; height: 14px; border-radius: 10px; overflow: hidden; border: 1.5px solid #666; box-shadow: inset 0 0 5px #000;">
+                            <div style="width: ${estado.porcentaje}%; 
+                                        background: linear-gradient(90deg, #d4af37 0%, #f1c40f 100%); 
+                                        height: 100%; 
+                                        box-shadow: 0 0 12px rgba(212, 175, 55, 0.8);
+                                        transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    const resultadosHtml = await Promise.all(htmlPromesas);
+    contenedor.innerHTML = resultadosHtml.join('');
+}
 
 async function ejecutarEliminarClienta() {
     // 1. Buscamos el modal para extraer el ID de la clienta que estamos editando
