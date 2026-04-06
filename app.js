@@ -2,11 +2,18 @@
 // 1. CONFIGURACIÓN DE BASE DE DATOS (V2)
 // =========================================
 const db = new Dexie("SalonDB");
-db.version(2).stores({
-    clientas: "++id, nombre, telefono, email, direccion, cp, localidad, observaciones",
+
+// Subimos a versión 3
+db.version(3).stores({
+    clientas: "++id, nombre, telefono, email, direccion, cp, localidad, observaciones, fechaNacimiento",
     servicios: "++id, nombre, coste",
     agenda: "++id, clienteId, servicioId, fecha",
     ventas: "++id, clienteId, servicioId, fecha, importe, metodoPago" 
+}).upgrade(tx => {
+    // Esta parte asegura que las clientas antiguas no den error al no tener el campo nuevo
+    return tx.clientas.toCollection().modify({
+        fechaNacimiento: ""
+    });
 });
 
 let calendar;
@@ -351,74 +358,97 @@ async function cargarHistorialVentas() {
 // =========================================
 // 6. GESTIÓN DE CLIENTAS Y SERVICIOS
 // =========================================
+
 function abrirModalNuevoCliente() {
     const modalEl = document.getElementById('modalClienta');
     if (!modalEl) return;
 
-    // 1. Limpiamos el ID de edición para que el sistema sepa que es una NUEVA clienta
+    // 1. Limpiamos el ID de edición
     modalEl.removeAttribute('data-edit-id');
     
     // 2. Reseteamos el título del modal
     const titulo = modalEl.querySelector('.modal-title');
     if (titulo) titulo.innerText = "Añadir Nueva Clienta";
     
-    // 3. Limpiamos todos los inputs del formulario
+    // 3. Limpiamos el formulario y los selectores manuales
     const form = document.getElementById('formClienta');
-    if (form) {
-        form.reset();
-    } else {
-        // Si no tienes etiqueta <form>, limpiamos los inputs manualmente
-        const inputs = modalEl.querySelectorAll('input, textarea');
-        inputs.forEach(input => input.value = '');
-    }
+    if (form) form.reset();
     
+    // Limpieza manual de los selectores de fecha
+    document.getElementById('selectDia').value = "";
+    document.getElementById('selectMes').value = "";
+    
+    // Ocultamos el botón eliminar para nuevas clientas
     document.getElementById('btnEliminarClienta').style.display = 'none';
 
     // 4. Mostramos el modal
     const modalInstance = new bootstrap.Modal(modalEl);
     modalInstance.show();
+    actualizarSugerenciasLocalidad(); // <--- Añade esto
 }
 
 async function guardarClienta() {
     const modalEl = document.getElementById('modalClienta');
     const id = modalEl.getAttribute('data-edit-id');
     
+    // Recogemos Día y Mes para formar el string de cumpleaños
+    const dia = document.getElementById('selectDia').value;
+    const mes = document.getElementById('selectMes').value;
+    const cumpleStr = (dia && mes) ? `${dia}/${mes}` : "";
+
     const datos = {
         nombre: document.getElementById('inputNombre').value,
         telefono: document.getElementById('inputTelefono').value,
         email: document.getElementById('inputEmail').value,
+        fechaNacimiento: cumpleStr, // Guardado como "Día/Mes"
         direccion: document.getElementById('inputDireccion').value,
         cp: document.getElementById('inputCP').value,
         localidad: document.getElementById('inputLocalidad').value,
-        observaciones: document.getElementById('inputObservaciones').value // <--- Nuevo
+        observaciones: document.getElementById('inputObservaciones').value
     };
+
+    // Validación mínima
+    if (!datos.nombre) {
+        alert("Por favor, introduce al menos el nombre de la clienta.");
+        return;
+    }
 
     try {
         if (id) {
+            // Editando clienta existente
             await db.clientas.update(parseInt(id), datos);
+            console.log("Clienta actualizada con éxito");
         } else {
+            // Añadiendo nueva clienta
             await db.clientas.add(datos);
+            console.log("Nueva clienta añadida con éxito");
         }
 
+        // Refrescar la interfaz
         listarClientas();
-        actualizarSelectores();
-        bootstrap.Modal.getInstance(modalEl).hide();
-        // Resetear el formulario manualmente para la próxima vez
-        document.getElementById('formClienta').reset(); 
+        if (typeof actualizarSelectores === "function") actualizarSelectores();
+        
+        // Cerrar modal y limpiar
+        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+        if (modalInstance) modalInstance.hide();
+        
+        document.getElementById('formClienta').reset();
+        modalEl.removeAttribute('data-edit-id');
+
     } catch (error) {
         console.error("Error al guardar clienta:", error);
+        alert("Hubo un error al guardar los datos.");
     }
 }
 
 async function prepararEdicionClienta(id) {
-    // 1. Buscamos la clienta en la base de datos por su ID
+    // 1. Buscamos la clienta en la base de datos
     const c = await db.clientas.get(parseInt(id));
     if (!c) return;
 
     const modalEl = document.getElementById('modalClienta');
 
-    // 2. Rellenamos cada input del modal con la info de la BD
-    // Usamos || '' para que si un campo está vacío no ponga "undefined"
+    // 2. Rellenamos los inputs básicos
     document.getElementById('inputNombre').value = c.nombre || '';
     document.getElementById('inputTelefono').value = c.telefono || '';
     document.getElementById('inputEmail').value = c.email || '';
@@ -426,16 +456,26 @@ async function prepararEdicionClienta(id) {
     document.getElementById('inputCP').value = c.cp || '';
     document.getElementById('inputLocalidad').value = c.localidad || '';
     document.getElementById('inputObservaciones').value = c.observaciones || '';
-    document.getElementById('btnEliminarClienta').style.display = 'block';
-    // 3. CAMBIAMOS EL TÍTULO DEL MODAL (Opcional pero profesional)
-    modalEl.querySelector('.modal-title').innerText = "Editar Ficha de Clienta";
+    
+    // 3. Rellenamos los selectores de Cumpleaños (Día/Mes)
+    if (c.fechaNacimiento && c.fechaNacimiento.includes('/')) {
+        const partes = c.fechaNacimiento.split('/');
+        document.getElementById('selectDia').value = partes[0];
+        document.getElementById('selectMes').value = partes[1];
+    } else {
+        document.getElementById('selectDia').value = "";
+        document.getElementById('selectMes').value = "";
+    }
 
-    // 4. GUARDAMOS EL ID en el modal para que 'guardarClienta' sepa que es una edición
+    // 4. Configuraciones visuales del modal
+    document.getElementById('btnEliminarClienta').style.display = 'block';
+    modalEl.querySelector('.modal-title').innerText = "Editar Ficha de Clienta";
     modalEl.setAttribute('data-edit-id', id);
 
-    // 5. MOSTRAMOS EL MODAL
+    // 5. Mostramos el modal
     const modalInstance = new bootstrap.Modal(modalEl);
     modalInstance.show();
+    actualizarSugerenciasLocalidad(); // <--- Añade esto
 }
 
 async function listarClientas() {
@@ -443,19 +483,26 @@ async function listarClientas() {
     const contenedor = document.getElementById('listaClientes');
     if (!contenedor) return;
 
+    // Ordenar alfabéticamente por nombre
+    clis.sort((a, b) => a.nombre.localeCompare(b.nombre));
+
     contenedor.innerHTML = clis.map(c => `
         <div class="col-md-4 mb-3">
-            <div class="list-group-item p-3 shadow-sm border-gold bg-dark text-white" 
+            <div class="list-group-item p-3 shadow-sm border-gold bg-dark text-white h-100" 
                  onclick="prepararEdicionClienta(${c.id})" 
-                 style="cursor: pointer;">
-                <h6 class="mb-1 fw-bold text-gold">${c.nombre}</h6>
+                 style="cursor: pointer; border-left: 4px solid #d4af37;">
+                <div class="d-flex justify-content-between align-items-start">
+                    <h6 class="mb-1 fw-bold text-gold">${c.nombre}</h6>
+                    ${c.fechaNacimiento ? `<small class="text-muted"><i class="fa-solid fa-cake-candles"></i> ${c.fechaNacimiento}</small>` : ''}
+                </div>
                 <p class="mb-0 small" style="color: #e0e0e0;">
-                    <i class="fa-solid fa-phone me-2 text-gold"></i>${c.telefono}
+                    <i class="fa-solid fa-phone me-2 text-gold"></i>${c.telefono || 'Sin teléfono'}
                 </p>
             </div>
         </div>
     `).join('');
 }
+
 
 async function ejecutarEliminarClienta() {
     // 1. Buscamos el modal para extraer el ID de la clienta que estamos editando
@@ -745,4 +792,26 @@ async function importarBackup(event) {
         }
     };
     reader.readAsText(archivo);
+}
+
+async function actualizarSugerenciasLocalidad() {
+    const datalist = document.getElementById('listaLocalidades');
+    if (!datalist) return;
+
+    // 1. Obtenemos todas las clientas
+    const clis = await db.clientas.toArray();
+
+    // 2. Extraemos solo las localidades, quitamos vacíos y duplicados
+    const localidadesUnicas = [...new Set(clis
+        .map(c => c.localidad)
+        .filter(l => l && l.trim() !== "")
+    )];
+
+    // 3. Ordenamos alfabéticamente
+    localidadesUnicas.sort();
+
+    // 4. Limpiamos y rellenamos el datalist
+    datalist.innerHTML = localidadesUnicas
+        .map(loc => `<option value="${loc}">`)
+        .join('');
 }

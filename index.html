@@ -43,11 +43,11 @@
             </ul>
         </div>
     </div>
-
-    <input type="file" id="importFileNavbar" accept=".json" style="display: none;" onchange="importarBackup(event)">
-    <button onclick="exportarBackup()" class="btn btn-sm btn-outline-gold ms-2 shadow-sm" title="Guardar Copia de Seguridad">
+    <button onclick="exportarBackup()" class="btn btn-sm btn-outline-gold ms-auto shadow-sm" title="Copia de Seguridad">
         <i class="fa-solid fa-cloud-arrow-down"></i>
     </button>
+    <input type="file" id="importFileNavbar" accept=".json" style="display: none;" onchange="importarBackup(event)">
+
     <button onclick="document.getElementById('importFileNavbar').click()" class="btn btn-sm btn-outline-gold ms-2 shadow-sm" title="Restaurar Copia de Seguridad">
         <i class="fa-solid fa-cloud-arrow-up"></i>
     </button>
@@ -181,64 +181,86 @@
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0">
             <div class="modal-header bg-dark text-white border-0">
-                <h5 class="modal-title">Nueva Clienta</h5>
+                <h5 class="modal-title">Ficha de Clienta</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-                <div class="modal-body p-4">
-                    <form id="formClienta">
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <div class="mb-2">
-                                    <label class="form-label mb-0 small fw-bold text-muted">Nombre Completo</label>
-                                    <input type="text" id="inputNombre" class="form-control form-control-sm">
+            <div class="modal-body p-4">
+                <form id="formClienta">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <label class="form-label mb-0 small fw-bold text-muted">Nombre Completo</label>
+                                <input type="text" id="inputNombre" class="form-control form-control-sm">
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-6">
+                                    <label class="form-label mb-0 small fw-bold text-muted">Teléfono</label>
+                                    <input type="text" id="inputTelefono" class="form-control form-control-sm">
                                 </div>
-                                <div class="row g-2">
-                                    <div class="col-6 mb-2">
-                                        <label class="form-label mb-0 small fw-bold text-muted">Teléfono</label>
-                                        <input type="text" id="inputTelefono" class="form-control form-control-sm">
-                                    </div>
-                                    <div class="col-6 mb-2">
-                                        <label class="form-label mb-0 small fw-bold text-muted">Email</label>
-                                        <input type="email" id="inputEmail" class="form-control form-control-sm">
-                                    </div>
-                                </div>
-                                <div class="mb-2">
-                                    <label class="form-label mb-0 small fw-bold text-muted">Dirección</label>
-                                    <input type="text" id="inputDireccion" class="form-control form-control-sm">
+                                <div class="col-6">
+                                    <label class="form-label mb-0 small fw-bold text-muted">Email</label>
+                                    <input type="email" id="inputEmail" class="form-control form-control-sm">
                                 </div>
                             </div>
-
-                            <div class="col-md-6">
-                                <div class="row g-2">
-                                    <div class="col-4 mb-2">
-                                        <label class="form-label mb-0 small fw-bold text-muted">C.P.</label>
-                                        <input type="text" id="inputCP" class="form-control form-control-sm">
-                                    </div>
-                                    <div class="col-8 mb-2">
-                                        <label class="form-label mb-0 small fw-bold text-muted">Localidad</label>
-                                        <input type="text" id="inputLocalidad" class="form-control form-control-sm">
-                                    </div>
-                                </div>
-                                <div class="mb-0">
-                                    <label class="form-label mb-0 small fw-bold text-muted">Observaciones / Notas</label>
-                                    <textarea id="inputObservaciones" class="form-control form-control-sm" rows="4"></textarea>
+                            <div class="mb-2">
+                                <label class="form-label mb-0 small fw-bold text-muted">Cumpleaños (Día / Mes)</label>
+                                <div class="d-flex gap-2">
+                                    <select id="selectDia" class="form-select form-select-sm">
+                                        <option value="">Día</option>
+                                        <script>
+                                            for(let i=1; i<=31; i++) document.write(`<option value="${i}">${i}</option>`);
+                                        </script>
+                                    </select>
+                                    <select id="selectMes" class="form-select form-select-sm">
+                                        <option value="">Mes</option>
+                                        <option value="1">Ene</option><option value="2">Feb</option>
+                                        <option value="3">Mar</option><option value="4">Abr</option>
+                                        <option value="5">May</option><option value="6">Jun</option>
+                                        <option value="7">Jul</option><option value="8">Ago</option>
+                                        <option value="9">Sep</option><option value="10">Oct</option>
+                                        <option value="11">Nov</option><option value="12">Dic</option>
+                                    </select>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="d-flex gap-2 mt-4">
-                            <button type="button" onclick="guardarClienta()" class="btn btn-dark flex-grow-1 py-2">
-                                <i class="fa-solid fa-save me-2"></i>Guardar Clienta
-                            </button>
-                            <button type="button" id="btnEliminarClienta" onclick="ejecutarEliminarClienta()" class="btn btn-outline-danger px-3">
-                                <i class="fa-solid fa-trash"></i>
-                            </button>
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <label class="form-label mb-0 small fw-bold text-muted">Dirección</label>
+                                <input type="text" id="inputDireccion" class="form-control form-control-sm">
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-4">
+                                    <label class="form-label mb-0 small fw-bold text-muted">C.P.</label>
+                                    <input type="text" id="inputCP" class="form-control form-control-sm">
+                                </div>
+                                <div class="col-8">
+                                    <label class="form-label mb-0 small fw-bold text-muted">Localidad</label>
+                                    <input type="text" id="inputLocalidad" class="form-control form-control-sm" list="listaLocalidades">
+                                    <datalist id="listaLocalidades"></datalist>
+                                </div>
+                            </div>
+                            <div class="mb-0">
+                                <label class="form-label mb-0 small fw-bold text-muted">Observaciones / Notas</label>
+                                <textarea id="inputObservaciones" class="form-control form-control-sm" rows="2" style="resize: none;"></textarea>
+                            </div>
                         </div>
-                    </form>
-                </div>
+                    </div>
+
+                    <div class="d-flex gap-2 mt-4">
+                        <button type="button" onclick="guardarClienta()" class="btn btn-dark flex-grow-1 py-2">
+                            <i class="fa-solid fa-save me-2"></i>Guardar Clienta
+                        </button>
+                        <button type="button" id="btnEliminarClienta" onclick="ejecutarEliminarClienta()" class="btn btn-outline-danger px-3">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 </div>
+
 
 <div class="modal fade" id="modalServicio" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
