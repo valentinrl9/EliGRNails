@@ -569,75 +569,80 @@ async function listarClientas() {
     const contenedor = document.getElementById('listaClientes');
     if (!contenedor) return;
 
-    // 1. Ordenar alfabéticamente por nombre
+    // 1. Ordenar alfabéticamente
     clis.sort((a, b) => a.nombre.localeCompare(b.nombre));
 
-    // 2. Mapeamos las clientas creando una promesa por cada una
+    // 2. Mapeamos las clientas
     const htmlPromesas = clis.map(async (c) => {
         const idLimpio = parseInt(c.id);
-        
-        // Obtenemos el estado de fidelidad
         const estado = await obtenerEstadoFidelidad(idLimpio);
         
-        // Calculamos el historial total acumulado (solo las pagadas)
         const ventasPagadas = await db.ventas
-            .where('clienteId')
-            .equals(idLimpio)
-            .filter(v => v.importe > 0)
-            .toArray();
+            .where('clienteId').equals(idLimpio)
+            .filter(v => v.importe > 0).toArray();
         const totalHistorico = ventasPagadas.length;
 
         return `
-            <div class="col-md-4 mb-3">
-                <div class="list-group-item p-3 shadow-sm border-gold bg-dark text-white h-100" 
-                     onclick="prepararEdicionClienta(${idLimpio})" 
-                     style="cursor: pointer; border-left: 4px solid #d4af37; border-radius: 8px;">
+            <div class="col-12" style="margin-bottom: 1px !important; padding: 0 8px !important;"> 
+                <div onclick="prepararEdicionClienta(${idLimpio})" 
+                     style="cursor: pointer !important; 
+                            display: flex !important; 
+                            align-items: center !important; 
+                            background: #1a1a1a !important; 
+                            color: white !important;
+                            padding: 3px 15px !important; 
+                            min-height: 42px !important; 
+                            /* BORDE DORADO Y RADIO DESTACADO */
+                            border: 1px solid #c5a059 !important; 
+                            border-left: 6px solid #c5a059 !important; 
+                            border-radius: 12px !important; 
+                            transition: all 0.2s ease;
+                            position: relative;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
                     
-                    <div class="d-flex justify-content-between align-items-start">
-                        <h6 class="mb-1 fw-bold text-gold">${c.nombre}</h6>
-                        ${c.fechaNacimiento ? `<small class="text-muted"><i class="fa-solid fa-cake-candles"></i> ${c.fechaNacimiento}</small>` : ''}
-                    </div>
-                    
-                    <p class="mb-2 small" style="color: #e0e0e0;">
-                        <i class="fa-solid fa-phone me-2 text-gold"></i>${c.telefono || 'Sin teléfono'}
-                    </p>
-
-                    <div class="mt-3 pt-2" style="border-top: 1px solid #444;">
-                        <div class="d-flex justify-content-between mb-1 align-items-end">
-                            <div class="d-flex flex-column">
-                                <span class="fw-bold" style="font-size: 0.8rem; color: #f8f9fa; letter-spacing: 0.5px; line-height: 1.2;">
-                                    PUNTOS: ${estado.actual}/10
-                                </span>
-                                <span style="font-size: 0.7rem; color: #b0b0b0; margin-top: 2px;">
-                                    Total pagadas: ${totalHistorico}
-                                </span>
-                            </div>
-                            
-                            ${estado.tocaRegalo ? `
-                                <div class="text-end">
-                                    <span class="text-warning fw-bold" style="font-size: 0.8rem;">
-                                        <i class="fa-solid fa-crown me-1"></i>¡REGALO!
-                                    </span>
-                                </div>
-                            ` : ''}
-                        </div>
+                    <div style="display: flex; width: 100%; align-items: center; gap: 15px;">
                         
-                        <div style="width: 100%; background: #1a1a1a; height: 14px; border-radius: 10px; overflow: hidden; border: 1.5px solid #666; box-shadow: inset 0 0 5px #000;">
-                            <div style="width: ${estado.porcentaje}%; 
-                                        background: linear-gradient(90deg, #d4af37 0%, #f1c40f 100%); 
-                                        height: 100%; 
-                                        box-shadow: 0 0 12px rgba(212, 175, 55, 0.8);
-                                        transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);">
+                        <div style="flex: 2.5; min-width: 160px;">
+                            <span style="font-size: 1.15rem !important; font-weight: 700 !important; color: #fcf6ba !important; white-space: nowrap; letter-spacing: 0.3px;">
+                                ${c.nombre}
+                            </span>
+                        </div>
+
+                        <div style="flex: 1; color: #888; font-size: 0.75rem; white-space: nowrap;">
+                            <i class="fa-solid fa-phone" style="font-size: 0.65rem; margin-right: 5px; color: #c5a059;"></i>${c.telefono || ''}
+                        </div>
+
+                        <div style="width: 55px; text-align: center; border-left: 1px solid #333; border-right: 1px solid #333;">
+                            <span style="font-size: 0.95rem; font-weight: bold; color: #ffffff;">${totalHistorico}</span>
+                        </div>
+
+                        <div style="flex: 2; display: flex; align-items: center; gap: 12px; justify-content: flex-end;">
+                            <span style="font-size: 0.8rem; font-weight: bold; color: #eee; min-width: 38px; text-align: right;">
+                                ${estado.actual}/10
+                            </span>
+                            
+                            <div style="width: 75px; background: #000; height: 5px; border-radius: 10px; border: 1px solid #444; overflow: hidden;">
+                                <div style="width: ${estado.porcentaje}%; background: linear-gradient(90deg, #c5a059, #fcf6ba); height: 100%;"></div>
+                            </div>
+
+                            <div style="width: 20px; text-align: center;">
+                                ${estado.tocaRegalo ? '<i class="fa-solid fa-crown text-warning" style="font-size: 0.9rem; filter: drop-shadow(0 0 3px rgba(255,215,0,0.6));"></i>' : ''}
                             </div>
                         </div>
+
                     </div>
                 </div>
             </div>
         `;
     });
 
-    const resultadosHtml = await Promise.all(htmlPromesas);
-    contenedor.innerHTML = resultadosHtml.join('');
+    // 3. Resolvemos y pintamos
+    try {
+        const resultadosHtml = await Promise.all(htmlPromesas);
+        contenedor.innerHTML = resultadosHtml.join('');
+    } catch (err) {
+        console.error("Error al renderizar filas:", err);
+    }
 }
 
 async function ejecutarEliminarClienta() {
