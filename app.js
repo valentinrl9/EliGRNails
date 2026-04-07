@@ -79,8 +79,9 @@ function initCalendar() {
         firstDay: 1,
         allDaySlot: false,
         nowIndicator: true,
+        contentHeight: 'auto',
         slotMinTime: '10:00:00',
-        slotMaxTime: '21:00:00',
+        slotMaxTime: '21:30:00',
         slotDuration: '00:30:00',
         slotLabelInterval: "00:30",
         defaultTimedEventDuration: '01:30:00',
@@ -98,19 +99,30 @@ function initCalendar() {
             const modalEl = document.getElementById('modalCita');
             modalEl.removeAttribute('data-edit-id');
             
+            // 1. Resetear el formulario
             const inputs = modalEl.querySelectorAll('input, select');
             inputs.forEach(i => i.disabled = false);
-            
             document.getElementById('modalCitaTitulo').innerText = "Nueva Cita";
             document.getElementById('btnEliminarCita').style.display = 'none';
             document.getElementById('btnCobrarCita').style.display = 'none';
             document.querySelector('button[onclick="agendarCita()"]').style.display = 'block';
 
-            let fecha = new Date(info.date);
-            const tzoffset = (new Date()).getTimezoneOffset() * 60000;
-            const localISOTime = (new Date(fecha - tzoffset)).toISOString().slice(0, 16);
-            document.getElementById('citaFecha').value = localISOTime;
+            // 2. CORRECCIÓN DE HORA (EL ARREGLO)
+            // Usamos la fecha que viene en 'info.date' pero la formateamos a mano
+            // para evitar que el navegador le sume o reste horas por la zona horaria.
+            const d = info.date;
+            const año = d.getFullYear();
+            const mes = String(d.getMonth() + 1).padStart(2, '0');
+            const dia = String(d.getDate()).padStart(2, '0');
+            const hora = String(d.getHours()).padStart(2, '0');
+            const minutos = String(d.getMinutes()).padStart(2, '0');
+
+            // Creamos el formato exacto que necesita el input datetime-local: YYYY-MM-DDTHH:mm
+            const fechaLocalCorrecta = `${año}-${mes}-${dia}T${hora}:${minutos}`;
             
+            document.getElementById('citaFecha').value = fechaLocalCorrecta;
+
+            // 3. Mostrar el modal
             new bootstrap.Modal(modalEl).show();
         },
 
@@ -565,15 +577,39 @@ async function prepararEdicionClienta(id) {
 }
 
 async function listarClientas() {
-    const clis = await db.clientas.toArray();
     const contenedor = document.getElementById('listaClientes');
     if (!contenedor) return;
 
-    // 1. Ordenar alfabéticamente
-    clis.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    const inputBusqueda = document.getElementById('buscadorClientas');
+    
+    // 1. Función interna para limpiar tildes y pasar a minúsculas
+    const limpiarTexto = (texto) => {
+        if (!texto) return "";
+        return texto
+            .toLowerCase()
+            .normalize("NFD") // Descompone tildes (á -> a + ´)
+            .replace(/[\u0300-\u036f]/g, ""); // Elimina los símbolos de tilde
+    };
 
-    // 2. Mapeamos las clientas
-    const htmlPromesas = clis.map(async (c) => {
+    // 2. Preparamos el filtro del buscador
+    const filtro = limpiarTexto(inputBusqueda ? inputBusqueda.value : "");
+
+    const clis = await db.clientas.toArray();
+
+    // 3. FILTRADO INTELIGENTE
+    const clientasFiltradas = clis.filter(c => {
+        const nombreLimpio = limpiarTexto(c.nombre);
+        const telefono = (c.telefono || "");
+        
+        // Comparamos el nombre limpio con el filtro limpio
+        return nombreLimpio.includes(filtro) || telefono.includes(filtro);
+    });
+
+    // 4. ORDEN (alfabético)
+    clientasFiltradas.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+
+    // 5. MAPEADO (Diseño de Lujo)
+    const htmlPromesas = clientasFiltradas.map(async (c) => {
         const idLimpio = parseInt(c.id);
         const estado = await obtenerEstadoFidelidad(idLimpio);
         
@@ -592,7 +628,6 @@ async function listarClientas() {
                             color: white !important;
                             padding: 3px 15px !important; 
                             min-height: 42px !important; 
-                            /* BORDE DORADO Y RADIO DESTACADO */
                             border: 1px solid #c5a059 !important; 
                             border-left: 6px solid #c5a059 !important; 
                             border-radius: 12px !important; 
@@ -601,47 +636,39 @@ async function listarClientas() {
                             box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
                     
                     <div style="display: flex; width: 100%; align-items: center; gap: 15px;">
-                        
                         <div style="flex: 2.5; min-width: 160px;">
                             <span style="font-size: 1.15rem !important; font-weight: 700 !important; color: #fcf6ba !important; white-space: nowrap; letter-spacing: 0.3px;">
                                 ${c.nombre}
                             </span>
                         </div>
-
                         <div style="flex: 1; color: #888; font-size: 0.75rem; white-space: nowrap;">
                             <i class="fa-solid fa-phone" style="font-size: 0.65rem; margin-right: 5px; color: #c5a059;"></i>${c.telefono || ''}
                         </div>
-
                         <div style="width: 55px; text-align: center; border-left: 1px solid #333; border-right: 1px solid #333;">
                             <span style="font-size: 0.95rem; font-weight: bold; color: #ffffff;">${totalHistorico}</span>
                         </div>
-
                         <div style="flex: 2; display: flex; align-items: center; gap: 12px; justify-content: flex-end;">
                             <span style="font-size: 0.8rem; font-weight: bold; color: #eee; min-width: 38px; text-align: right;">
                                 ${estado.actual}/10
                             </span>
-                            
                             <div style="width: 75px; background: #000; height: 5px; border-radius: 10px; border: 1px solid #444; overflow: hidden;">
                                 <div style="width: ${estado.porcentaje}%; background: linear-gradient(90deg, #c5a059, #fcf6ba); height: 100%;"></div>
                             </div>
-
                             <div style="width: 20px; text-align: center;">
                                 ${estado.tocaRegalo ? '<i class="fa-solid fa-crown text-warning" style="font-size: 0.9rem; filter: drop-shadow(0 0 3px rgba(255,215,0,0.6));"></i>' : ''}
                             </div>
                         </div>
-
                     </div>
                 </div>
             </div>
         `;
     });
 
-    // 3. Resolvemos y pintamos
     try {
         const resultadosHtml = await Promise.all(htmlPromesas);
         contenedor.innerHTML = resultadosHtml.join('');
     } catch (err) {
-        console.error("Error al renderizar filas:", err);
+        console.error("Error al renderizar:", err);
     }
 }
 
