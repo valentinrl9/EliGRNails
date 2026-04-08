@@ -76,6 +76,13 @@ function initCalendar() {
     calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'timeGridWeek',
         locale: 'es',
+        buttonText: {
+        today:    'Hoy',
+        month:    'Mes',
+        week:     'Semana',
+        day:      'Día',
+        list:     'Lista'
+        },
         firstDay: 1,
         allDaySlot: false,
         nowIndicator: true,
