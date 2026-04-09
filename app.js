@@ -1039,7 +1039,7 @@ function mostrarAlertaCumple(cumpleañeras) {
     cumpleañeras.forEach(c => {
         const divFila = document.createElement('div');
         divFila.className = 'mb-4 p-3 border border-gold rounded bg-black'; 
-        divFila.id = `fila-cumple-${c.id}`; // ID para poder ocultarla luego
+        divFila.id = `fila-cumple-${c.id}`;
         
         divFila.innerHTML = `
             <div class="d-flex justify-content-between align-items-center mb-3">
@@ -1047,14 +1047,11 @@ function mostrarAlertaCumple(cumpleañeras) {
                 <span class="badge bg-gold text-dark">🎂 Regalo</span>
             </div>
             <div class="d-grid gap-2">
-                <button onclick="enviarMensajeClienta('${c.telefono}', '${c.nombre}', ${c.id})" class="btn btn-success btn-sm">
+                <button id="btn-cumple-${c.id}" 
+                        onclick="enviarWhatsAppCumple('${c.telefono}', '${c.nombre}', '${c.id}')" 
+                        data-paso="1" 
+                        class="btn btn-success w-100">
                     <i class="bi bi-whatsapp"></i> 1. Enviar a Clienta
-                </button>
-                <button id="btn-mi-aviso-${c.id}" onclick="enviarMensajeMio('${c.nombre}')" class="btn btn-outline-info btn-sm" style="display:none;">
-                    <i class="bi bi-person-check"></i> 2. Registrar en mi WhatsApp
-                </button>
-                <button onclick="marcarComoHecho(${c.id})" class="btn btn-dark btn-sm mt-1" style="font-size: 0.7rem;">
-                    Ocultar esta clienta
                 </button>
             </div>
         `;
@@ -1077,19 +1074,19 @@ function enviarWhatsAppCumple(telefono, nombre, id) {
         
         // FINALIZAR: Ponemos el botón en gris y lo desactivamos
         boton.innerHTML = "✅ Completado";
-        boton.className = "btn btn-secondary w-100";
+        boton.className = "btn btn-secondary w-100 mt-2";
         boton.disabled = true;
         document.getElementById(`fila-cumple-${id}`).style.opacity = '0.4';
 
     } else {
         // ENVÍO PARA LA CLIENTA
-        const mensajeClienta = `¡Hola ${nombre}! 🎂 Desde Eli-GR Nails te deseamos un muy feliz cumpleaños. ✨ Tenemos un regalito especial para ti en el salón, ¡pásate a vernos cuando quieras!`;
+        const mensajeClienta = `¡Hola ${nombre}! 🎂 Desde Eli·GR Nails te deseamos un muy feliz cumpleaños. ✨ Tenemos un regalito especial para ti en el salón, ¡pásate a vernos cuando quieras!`;
         window.open(`https://wa.me/34${telefono}?text=${encodeURIComponent(mensajeClienta)}`, '_blank');
 
         // CAMBIAMOS EL BOTÓN para que el próximo clic sea para ti
         if (boton) {
             boton.innerHTML = "2. Registrar en MI WhatsApp";
-            boton.className = "btn btn-info w-100 text-white"; // Color azul para diferenciar
+            boton.className = "btn btn-info w-100 text-white mt-2"; // Color azul para diferenciar
             boton.setAttribute('data-paso', '2');
         }
     }
