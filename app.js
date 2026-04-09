@@ -16,6 +16,46 @@ db.version(3).stores({
     });
 });
 
+// Función para comprobar si hoy es el cumpleaños de alguna clienta
+async function checkCumpleaños() {
+    try {
+        const hoy = new Date();
+        const diaHoy = hoy.getDate();
+        const mesHoy = hoy.getMonth() + 1;
+
+        const todas = await db.clientas.toArray();
+        
+        const cumpleañeras = todas.filter(c => {
+            if (!c.fechaNacimiento || c.fechaNacimiento === "") return false;
+
+            let diaNac, mesNac;
+
+            // CASO 1: Formato "día/mes" (ej: "3/1" o "03/01")
+            if (c.fechaNacimiento.includes('/')) {
+                const partes = c.fechaNacimiento.split('/');
+                diaNac = parseInt(partes[0]);
+                mesNac = parseInt(partes[1]);
+            } 
+            // CASO 2: Formato estándar "YYYY-MM-DD" (el de los calendarios)
+            else if (c.fechaNacimiento.includes('-')) {
+                const f = new Date(c.fechaNacimiento);
+                diaNac = f.getDate();
+                mesNac = f.getMonth() + 1;
+            }
+
+            return diaNac === diaHoy && mesNac === mesHoy;
+        });
+
+        if (cumpleañeras.length > 0) {
+            console.log("¡Cumpleaños detectados!", cumpleañeras);
+            mostrarAlertaCumple(cumpleañeras);
+        }
+    } catch (error) {
+        console.error("Error al comprobar cumpleaños:", error);
+    }
+}
+
+
 // Función para calcular cuántas sesiones lleva una clienta
 async function obtenerEstadoFidelidad(clienteId) {
     try {
@@ -172,6 +212,8 @@ function initCalendar() {
         }
     });
     calendar.render();
+
+    checkCumpleaños();
 }
 
 
@@ -979,4 +1021,64 @@ async function actualizarSugerenciasLocalidad() {
     datalist.innerHTML = localidadesUnicas
         .map(loc => `<option value="${loc}">`)
         .join('');
+}
+
+
+//CUMPLEAÑOS
+function mostrarAlertaCumple(cumpleañeras) {
+    const modal = new bootstrap.Modal(document.getElementById('modalCumple'));
+    const listaTexto = document.getElementById('listaCumplesTexto');
+    const contenedorBotones = document.getElementById('contenedorBotonesCumple');
+    
+    // 1. Personalizamos el mensaje principal
+    if (cumpleañeras.length === 1) {
+        listaTexto.innerHTML = `Hoy es el cumpleaños de <strong class="text-gold" style="font-size: 1.2rem;">${cumpleañeras[0].nombre}</strong>. ✨`;
+    } else {
+        listaTexto.innerHTML = `Hoy hay <strong>${cumpleañeras.length}</strong> clientas de cumpleaños:`;
+    }
+
+    contenedorBotones.innerHTML = ''; // Limpiar contenedor
+
+    // 2. Creamos los botones con el nombre bien visible
+    cumpleañeras.forEach(c => {
+        const divFila = document.createElement('div');
+        divFila.className = 'mb-3 p-3 border border-gold rounded bg-black'; // Un recuadro para resaltar el nombre
+        
+        divFila.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <span class="text-white fw-bold">${c.nombre}</span>
+                <span class="badge bg-gold text-dark">🎂 Regalo</span>
+            </div>
+            <button onclick="enviarWhatsAppCumple('${c.telefono}', '${c.nombre}')" class="btn btn-success w-100">
+                <i class="bi bi-whatsapp"></i> Enviar Felicitación
+            </button>
+        `;
+        contenedorBotones.appendChild(divFila);
+    });
+
+    modal.show();
+}
+
+function enviarWhatsAppCumple(telefono, nombre) {
+    // 1. Datos para la clienta
+    const mensajeClienta = `¡Hola ${nombre}! 🎂 Desde Eli-GR Nails te deseamos un muy feliz cumpleaños. ✨ Tenemos un regalito especial para ti en el salón, ¡pásate a vernos cuando quieras!`;
+    const urlClienta = `https://wa.me/34${telefono}?text=${encodeURIComponent(mensajeClienta)}`;
+    
+    // 2. TUS DATOS (Pon aquí tu número de móvil que usas para el salón)
+    const miTelefono = "622121155"; 
+    const mensajeParaMi = `✅ Cumpleaños gestionado: Se ha enviado el regalo de cumple a *${nombre}*.`;
+    const urlMia = `https://wa.me/34${miTelefono}?text=${encodeURIComponent(mensajeParaMi)}`;
+
+    // 3. Primer envío: La clienta
+    window.open(urlClienta, '_blank');
+
+    // 4. Segundo envío: Notificación para ti
+    // Esperamos 2 segundos para no saturar el navegador de la tablet
+    setTimeout(() => {
+        // Mostramos un pequeño aviso para que no sea intrusivo
+        const confirmar = confirm(`¿Quieres registrar el envío de ${nombre} en tu propio WhatsApp?`);
+        if (confirmar) {
+            window.open(urlMia, '_blank');
+        }
+    }, 2000);
 }
