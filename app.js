@@ -861,7 +861,7 @@ async function forzarDesbloqueo() {
  // COPIA DE SEGURIDAD RECTIFICADA
 async function exportarBackup() {
     try {
-        // 1. Extraemos todas las tablas de tu BD (Mantenemos tu lógica original)
+        // 1. Extraemos los datos (Tu lógica original que funciona perfecto)
         const [clientas, servicios, agenda, ventas] = await Promise.all([
             db.clientas.toArray(),
             db.servicios.toArray(),
@@ -869,72 +869,47 @@ async function exportarBackup() {
             db.ventas.toArray()
         ]);
         
-        // 2. Estructuramos el objeto de respaldo
         const ahora = new Date();
         const backupData = {
             info: {
                 fecha: ahora.toLocaleString(),
-                dispositivo: navigator.userAgent,
                 totalRegistros: clientas.length + servicios.length + agenda.length + ventas.length
             },
-            tablas: {
-                clientas: clientas,
-                servicios: servicios,
-                agenda: agenda,
-                ventas: ventas
-            }
+            tablas: { clientas, servicios, agenda, ventas }
         };
 
-        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-
-        // --- LÓGICA DE NOMBRE CON HORA (Mantenida igual) ---
-        const fecha = ahora.toISOString().slice(0, 10); // YYYY-MM-DD
+        // 2. Creamos el archivo
+        const json = JSON.stringify(backupData, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        
+        const fecha = ahora.toISOString().slice(0, 10);
         const horas = ahora.getHours().toString().padStart(2, '0');
         const minutos = ahora.getMinutes().toString().padStart(2, '0');
         const nombreArchivo = `eli_backup_${fecha}_${horas}-${minutos}.json`;
 
-        // 3. INTENTO DE COMPARTIR (Móvil/Tablet)
-        // Usamos un try interno para que si falla el compartir, NO salte al catch principal
-        try {
-            if (navigator.share && navigator.canShare) {
-                const archivo = new File([blob], nombreArchivo, { type: 'application/json' });
-                if (navigator.canShare({ files: [archivo] })) {
-                    await navigator.share({
-                        title: 'Backup Eli-GR Nails',
-                        text: `Copia de seguridad ${ahora.toLocaleString()}`,
-                        files: [archivo]
-                    });
-                    // Si llega aquí es que se compartió con éxito
-                    return; 
-                }
-            }
-        } catch (shareError) {
-            console.log("El sistema de compartir dio error o fue cancelado. Intentando descarga directa...");
-        }
-
-        // 4. DESCARGA TRADICIONAL (Fallback para PC o tablets restrictivas)
-        // Si el código llega aquí es porque el compartir no funcionó o no está disponible
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = nombreArchivo;
-        document.body.appendChild(a);
-        a.click();
+        // 3. DESCARGA DIRECTA (Sin usar navigator.share para evitar el error de la tablet)
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
         
-        // Limpieza de memoria
+        link.href = url;
+        link.download = nombreArchivo;
+        
+        // El truco para tablets: El link debe estar físicamente en el documento para que el click funcione
+        document.body.appendChild(link);
+        link.click();
+        
+        // Limpiamos rápido
         setTimeout(() => {
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }, 100);
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        }, 500);
 
-        alert("Copia generada. Si no se abrió el menú de compartir, busca el archivo '" + nombreArchivo + "' en tu carpeta de Descargas.");
+        // Mensaje de éxito manual
+        alert("¡Copia de seguridad creada!\n\nBusca el archivo '" + nombreArchivo + "' en la carpeta de Descargas de tu tablet.");
 
     } catch (error) {
-        // Solo avisamos de error si es algo realmente crítico (como fallo en la base de datos)
-        console.error("Error crítico en el backup:", error);
-        if (error.name !== 'AbortError') {
-            alert("No se pudo generar la copia. Revisa la conexión con la base de datos.");
-        }
+        console.error("Error en backup:", error);
+        alert("Error al acceder a la base de datos. Asegúrate de que no tienes otras pestañas abiertas.");
     }
 }
 
