@@ -221,47 +221,67 @@ function initCalendar() {
 // 4. GESTIÓN DE CITAS
 // =========================================
 async function prepararEdicionCita(id) {
-    const cita = await db.agenda.get(parseInt(id));
-    if (!cita) return;
-
     const modalEl = document.getElementById('modalCita');
-    modalEl.setAttribute('data-edit-id', id);
     
-    // Referencias a elementos
-    const btnGuardar = modalEl.querySelector('button[onclick="agendarCita()"]');
-    const btnEliminar = document.getElementById('btnEliminarCita');
-    const btnCobrar = document.getElementById('btnCobrarCita');
-    const inputs = modalEl.querySelectorAll('input, select');
+    // 1. CARGAR LISTAS ORDENADAS (Esto limpia lo anterior y pone los guiones)
+    const clientas = await db.clientas.toArray();
+    clientas.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", 'es', { sensitivity: 'base' }));
+    
+    document.getElementById('selCli').innerHTML = '<option value="">--- Selecciona Clienta ---</option>' + 
+        clientas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
 
-    if (cita.cobrado) {
-        document.getElementById('modalCitaTitulo').innerText = "Cita Finalizada (Bloqueada)";
-        // Desactivar todo
-        inputs.forEach(i => i.disabled = true);
-        btnGuardar.style.display = 'none';
-        btnEliminar.style.display = 'none';
-        btnCobrar.innerHTML = '<i class="fa-solid fa-lock me-2"></i> YA COBRADO';
-        btnCobrar.disabled = true;
-        btnCobrar.classList.replace('btn-success', 'btn-secondary');
-        document.getElementById('btnForzarDesbloqueo').style.display = 'inline-block'; // Mostrar botón de pánico
+    const servicios = await db.servicios.toArray();
+    document.getElementById('selSer').innerHTML = '<option value="">--- Selecciona Servicio ---</option>' + 
+        servicios.map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
+
+    // 2. SI ES UNA CITA EXISTENTE
+    if (id) {
+        const cita = await db.agenda.get(parseInt(id));
+        if (!cita) return;
+
+        modalEl.setAttribute('data-edit-id', id);
+        
+        // Configurar UI de Cobrado/Pendiente (tu código actual)
+        const btnGuardar = modalEl.querySelector('button[onclick="agendarCita()"]');
+        const btnEliminar = document.getElementById('btnEliminarCita');
+        const btnCobrar = document.getElementById('btnCobrarCita');
+        const inputs = modalEl.querySelectorAll('input, select');
+
+        if (cita.cobrado) {
+            document.getElementById('modalCitaTitulo').innerText = "Cita Finalizada (Bloqueada)";
+            inputs.forEach(i => i.disabled = true);
+            btnGuardar.style.display = 'none';
+            btnEliminar.style.display = 'none';
+            btnCobrar.disabled = true;
+        } else {
+            document.getElementById('modalCitaTitulo').innerText = "Gestionar Cita";
+            inputs.forEach(i => i.disabled = false);
+            btnGuardar.style.display = 'block';
+            btnEliminar.style.display = 'block';
+            btnCobrar.disabled = false;
+        }
+
+        // Poner los valores de la cita
+        document.getElementById('selCli').value = cita.clienteId;
+        document.getElementById('selSer').value = cita.servicioId;
+        document.getElementById('citaFecha').value = cita.fecha;
+
     } else {
-        document.getElementById('modalCitaTitulo').innerText = "Gestionar Cita";
-        // Activar todo
-        inputs.forEach(i => i.disabled = false);
-        btnGuardar.style.display = 'block';
-        btnEliminar.style.display = 'block';
-        btnCobrar.innerHTML = '<i class="fa-solid fa-cash-register me-2"></i> FINALIZAR Y COBRAR';
-        btnCobrar.disabled = false;
-        btnCobrar.classList.replace('btn-secondary', 'btn-success');
-        btnCobrar.style.display = 'block';
-        document.getElementById('btnForzarDesbloqueo').style.display = 'none'; // Esconderlo si está pendiente
+        // 3. SI ES UNA CITA NUEVA (Limpieza total)
+        modalEl.removeAttribute('data-edit-id');
+        document.getElementById('modalCitaTitulo').innerText = "Nueva Cita";
+        document.getElementById('selCli').value = "";
+        document.getElementById('selSer').value = "";
+        document.getElementById('citaFecha').value = "";
+        
+        const btnEliminar = document.getElementById('btnEliminarCita');
+        const btnCobrar = document.getElementById('btnCobrarCita');
+        if(btnEliminar) btnEliminar.style.display = 'none';
+        if(btnCobrar) btnCobrar.style.display = 'none';
     }
 
-    document.getElementById('selCli').value = cita.clienteId;
-    document.getElementById('selSer').value = cita.servicioId;
-    document.getElementById('citaFecha').value = cita.fecha;
-
     new bootstrap.Modal(modalEl).show();
-}
+}   
 
 async function agendarCita() {
     const modalEl = document.getElementById('modalCita');
@@ -881,11 +901,23 @@ async function actualizarSelectores() {
     const clis = await db.clientas.toArray();
     const sers = await db.servicios.toArray();
     
+    // 1. Ordenar clientas alfabéticamente
+    clis.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", 'es', { sensitivity: 'base' }));
+
     const selCli = document.getElementById('selCli');
     const selSer = document.getElementById('selSer');
     
-    if(selCli) selCli.innerHTML = clis.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
-    if(selSer) selSer.innerHTML = sers.map(s => `<option value="${s.id}">${s.nombre} (${s.coste}€)</option>`).join('');
+    if(selCli) {
+        // Añadimos la opción vacía al principio para que no salga ninguna clienta por defecto
+        selCli.innerHTML = '<option value="" disabled selected>--- Selecciona Clienta ---</option>' + 
+            clis.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+    }
+
+    if(selSer) {
+        // Añadimos la opción vacía al principio para los servicios
+        selSer.innerHTML = '<option value="" disabled selected>--- Selecciona Servicio ---</option>' + 
+            sers.map(s => `<option value="${s.id}">${s.nombre} (${s.coste}€)</option>`).join('');
+    }
 }
 
 async function forzarDesbloqueo() {
