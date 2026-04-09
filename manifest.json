@@ -1,15 +1,16 @@
 {
-  "short_name": "SalonPro",
-  "name": "Mi Salón Manager",
+  "short_name": "Eli-GR Nails",
+  "name": "Eli-GR Nails - Gestión de Salón",
   "icons": [
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/2614/2614343.png",
+      "src": "logo3.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ],
-  "start_url": ".",
+  "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#212529"
+  "background_color": "#1a1a1a",
+  "theme_color": "#c5a059"
 }

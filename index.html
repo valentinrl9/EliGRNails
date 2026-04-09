@@ -3,127 +3,126 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Eli GR Nails | Gestión</title>
+    <link rel="manifest" href="manifest.json">
+    <title>Eli·GR Nails | Salón de Manicura</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="apple-touch-icon" href="logo.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Eli-GR Nails">
+    <link rel="shortcut icon" sizes="196x196" href="logo_salon.png">
+    <link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.11.0/main.min.css' rel='stylesheet' />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<nav class="navbar navbar-expand-lg navbar-dark sticky-top shadow-sm">
-    <div class="container-fluid d-flex align-items-center justify-content-between">
-        
-        <a class="navbar-brand d-flex align-items-center" href="#">
-            <img src="logo.png" alt="Logo" onerror="this.src='https://cdn-icons-png.flaticon.com/512/3567/3567015.png'">
-            <span class="ms-2 d-none d-lg-inline">Eli·GR NAILS</span>
+<nav class="navbar navbar-expand-lg sticky-top">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="#">
+            <img src="logo.png" alt="Logo EliGR Nails">
+            <span>Eli·GR Nails</span>
         </a>
+        
+        <button class="navbar-toggler border-0" type="button" 
+                data-bs-toggle="collapse" data-bs-target="#navbarNav" 
+                aria-label="Abrir menú de navegación" title="Abrir menú">
+            <i class="fa-solid fa-bars text-white"></i>
+        </button>
 
-        <div class="nav nav-pills" id="pills-tab" role="tablist">
-            <button class="nav-link active btn-nav" data-bs-toggle="pill" data-bs-target="#tab-agenda">
-                <i class="fa-solid fa-calendar-week"></i> <span class="d-none d-sm-inline ms-1">Agenda</span>
-            </button>
-            <button class="nav-link btn-nav mx-1" data-bs-toggle="pill" data-bs-target="#tab-clientes" onclick="listarClientes()">
-                <i class="fa-solid fa-users"></i> <span class="d-none d-sm-inline ms-1">Clientes</span>
-            </button>
-            <button class="nav-link btn-nav" data-bs-toggle="pill" data-bs-target="#tab-servicios" onclick="listarServicios()">
-                <i class="fa-solid fa-hand-sparkles"></i> <span class="d-none d-sm-inline ms-1">Servicios</span>
-            </button>
-        </div>
-
-        <div class="d-flex align-items-center">
-            <button class="btn btn-outline-gold btn-sm" onclick="descargarBackup()" title="Backup">
-                <i class="fa-solid fa-cloud-arrow-down"></i>
-            </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="nav nav-pills ms-auto" id="pills-tab" role="tablist">
+                <li class="nav-item">
+                    <button class="nav-link btn-nav active" id="tab-agenda" data-bs-toggle="pill" data-bs-target="#content-agenda">Agenda</button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link btn-nav" id="tab-clientes" data-bs-toggle="pill" data-bs-target="#content-clientes">Clientas</button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link btn-nav" id="tab-servicios" data-bs-toggle="pill" data-bs-target="#content-servicios">Servicios</button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link btn-nav" id="tab-ventas" data-bs-toggle="pill" data-bs-target="#content-ventas" onclick="cargarHistorialVentas()">Caja e Ingresos</button>
+                </li>
+            </ul>
         </div>
     </div>
+    <button onclick="exportarBackup()" class="btn btn-sm btn-outline-gold ms-auto shadow-sm" title="Copia de Seguridad">
+        <i class="fa-solid fa-cloud-arrow-down"></i>
+    </button>
+    <input type="file" id="importFileNavbar" accept=".json" style="display: none;" onchange="importarBackup(event)">
+
+    <button onclick="document.getElementById('importFileNavbar').click()" class="btn btn-sm btn-outline-gold ms-2 shadow-sm" title="Restaurar Copia de Seguridad">
+        <i class="fa-solid fa-cloud-arrow-up"></i>
+    </button>
 </nav>
 
-<div class="container-fluid mt-3">
-    <div class="tab-content">
+<div class="container-fluid py-4">
+    <div class="tab-content" id="pills-tabContent">
         
-        <div class="tab-pane fade show active" id="tab-agenda">
-            <div class="row g-3">
-                <div class="col-12">
-                    <button class="btn btn-dark w-100 py-3 mb-3 shadow-sm fw-bold" data-bs-toggle="modal" data-bs-target="#modalCita" style="border: 1px solid var(--dorado); color: var(--dorado);">
-                        <i class="fa-solid fa-plus-circle me-2"></i> AGENDAR NUEVA CITA
-                    </button>
-                    <div class="card border-0 shadow-sm p-2">
-                        <div id="calendario"></div>
-                    </div>
+        <div class="tab-pane fade show active" id="content-agenda">
+            <div class="card border-0 shadow-sm p-3">
+                <div id="calendario"></div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="content-clientes">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2 class="text-white">Gestión de Clientas</h2>
+                <button class="btn btn-dark border-gold" onclick="abrirModalNuevoCliente()">
+                    <i class="fa-solid fa-user-plus me-2"></i>Nueva Clienta
+                </button>           
+            </div>
+            <div class="mb-3">
+                <input type="text" 
+                    id="buscadorClientas" 
+                    class="form-control bg-dark text-white border-gold" 
+                    placeholder="🔍 Buscar clienta por nombre o teléfono..." 
+                    onkeyup="listarClientas()">
+            </div>
+            <div id="listaClientes" class="row g-3">
+                </div>
+        </div>
+
+        <div class="tab-pane fade" id="content-servicios">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2 class="text-white">Mis Servicios</h2>
+            <button class="btn btn-dark border-gold" onclick="abrirModalNuevoServicio()">
+                <i class="fa-solid fa-sparkles me-2"></i>Nuevo Servicio
+            </button>            </div>
+            <div id="listaServicios" class="row g-3">
+                </div>
+        </div>
+
+        <div class="tab-pane fade" id="content-ventas">
+            <div class="card border-0 shadow-lg p-4">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h3>Historial de Ventas</h3>
+                    <h4 class="text-gold">Total Acumulado: <span id="totalCajaGeneral">0€</span></h4>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Clienta</th>
+                                <th>Servicio</th>
+                                <th>Método</th>
+                                <th>Importe</th>
+                                <th class="text-end">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaVentasBody">
+                            </tbody>
+                    </table>
                 </div>
             </div>
         </div>
 
-        <div class="tab-pane fade" id="tab-clientes">
-            <div class="d-flex gap-2 mb-3">
-                <div class="input-group shadow-sm">
-                    <span class="input-group-text bg-white border-end-0"><i class="fa-solid fa-magnifying-glass text-muted"></i></span>
-                    <input type="text" id="inputBusqueda" class="form-control border-start-0" placeholder="Buscar por nombre, tel o ciudad..." onkeyup="filtrarClientes()">
-                </div>
-                <button class="btn btn-dark px-4" data-bs-toggle="modal" data-bs-target="#modalNuevoCliente" onclick="prepararNuevoCliente()">
-                    <i class="fa-solid fa-user-plus" style="color: var(--dorado);"></i>
-                </button>
-            </div>
-            <div id="listaClientes" class="row g-2"></div>
-        </div>
-
-        <div class="tab-pane fade" id="tab-servicios">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h4 class="fw-bold mb-0">Carta de Servicios</h4>
-                <button class="btn btn-dark btn-sm text-gold" data-bs-toggle="modal" data-bs-target="#modalNuevoServicio" onclick="prepararNuevoServicio()" style="border-color: var(--dorado);">
-                    <i class="fa-solid fa-plus me-1"></i> Añadir
-                </button>
-            </div>
-            <div class="card border-0 shadow-sm">
-                <ul id="listaServicios" class="list-group list-group-flush"></ul>
-            </div>
-        </div>
-
-    </div>
-</div>
-
-<div class="modal fade" id="modalNuevoCliente" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content border-0 shadow-lg">
-            <input type="hidden" id="edit_cli_id" value="">
-            <div class="modal-header border-0">
-                <h5 class="modal-title fw-bold" id="modalClienteTitulo">Ficha Clienta</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body pt-0">
-                <div class="row g-3">
-                    <div class="col-6"><label class="label-custom">Nombre</label><input type="text" id="nom" class="form-control"></div>
-                    <div class="col-6"><label class="label-custom">Apellidos</label><input type="text" id="ape" class="form-control"></div>
-                    <div class="col-12"><label class="label-custom">Teléfono</label><input type="tel" id="tel" class="form-control"></div>
-                    <div class="col-12"><label class="label-custom">Dirección</label><input type="text" id="dir" class="form-control"></div>
-                    <div class="col-4"><label class="label-custom">C.P.</label><input type="text" id="cp" class="form-control"></div>
-                    <div class="col-8"><label class="label-custom">Población</label><input type="text" id="pob" class="form-control"></div>
-                    <div class="col-12"><label class="label-custom">Cumpleaños</label><input type="date" id="cumple" class="form-control"></div>
-                    <div class="col-12"><label class="label-custom">Observaciones Técnicas</label><textarea id="obs" class="form-control" rows="3"></textarea></div>
-                </div>
-            </div>
-            <div class="modal-footer border-0">
-                <button class="btn btn-success w-100 fw-bold py-2" onclick="guardarCliente()">GUARDAR DATOS</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="modal fade" id="modalNuevoServicio" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-sm">
-        <div class="modal-content border-0">
-            <input type="hidden" id="edit_ser_id">
-            <div class="modal-header border-0"><h5 class="modal-title fw-bold" id="modalServicioTitulo">Servicio</h5></div>
-            <div class="modal-body">
-                <div class="mb-3"><label class="label-custom">Nombre</label><input type="text" id="sNom" class="form-control"></div>
-                <div class="mb-3"><label class="label-custom">Precio (€)</label><input type="number" id="sPre" class="form-control"></div>
-            </div>
-            <div class="modal-footer border-0">
-                <button class="btn btn-dark w-100" onclick="guardarServicio()">GUARDAR SERVICIO</button>
-            </div>
-        </div>
     </div>
 </div>
 
@@ -131,7 +130,7 @@
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg">
             <div class="modal-header bg-dark text-white border-0">
-                <h5 class="modal-title" id="modalCitaTitulo">Nueva Cita</h5>
+                <h5 class="modal-title" id="modalCitaTitulo">Detalles de la Cita</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-4">
@@ -148,12 +147,174 @@
                     <input type="datetime-local" id="citaFecha" class="form-control" step="900">
                 </div>
                 
-                <div class="d-flex gap-2">
-                    <button onclick="agendarCita()" class="btn btn-dark flex-grow-1 py-2">
-                        CONFIRMAR EN AGENDA
+                <div class="d-grid gap-2">
+                    <div class="d-flex gap-2">
+                        <button onclick="agendarCita()" class="btn btn-dark flex-grow-1 py-2">GUARDAR CAMBIOS</button>
+                        <button id="btnEliminarCita" onclick="eliminarCita()" class="btn btn-outline-danger px-3">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                        <button id="btnForzarDesbloqueo" onclick="forzarDesbloqueo()" class="btn btn-warning btn-sm ms-2" style="display:none;">
+                            <i class="fa-solid fa-unlock"></i> Desbloquear
+                        </button>
+                    </div>
+                    <button id="btnCobrarCita" onclick="iniciarCobro()" class="btn btn-success py-2 fw-bold">
+                        <i class="fa-solid fa-cash-register me-2"></i> FINALIZAR Y COBRAR
                     </button>
-                    <button id="btnEliminarCita" onclick="eliminarCita()" class="btn btn-outline-danger px-3">
-                        <i class="fa-solid fa-trash"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalCumple" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark border-gold">
+            <div class="modal-header border-gold">
+                <h5 class="modal-title text-gold"><i class="bi bi-cake2"></i> ¡Cumpleaños de Hoy!</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-white">
+                <p id="listaCumplesTexto">Cargando...</p>
+                <div id="contenedorBotonesCumple"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalCobro" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-success text-white border-0">
+                <h5 class="modal-title w-100 text-center">Finalizar Venta</h5>
+            </div>
+            <div class="modal-body p-4 text-center">
+                <p class="text-muted small mb-1">IMPORTE FINAL (€)</p>
+                <input type="number" id="inputImporteFinal" class="form-control form-control-lg text-center fw-bold mb-2" 
+                       style="color: var(--dorado); font-size: 2rem; border: 2px solid #eee;">
+                <small class="text-muted d-block mb-4">Puedes editarlo si hay extras o descuentos</small>
+                
+                <div class="mb-3 text-start">
+                    <label class="label-custom">Método de Pago</label>
+                    <select id="metodoPago" class="form-select">
+                        <option value="Efectivo">💵 Efectivo</option>
+                        <option value="Tarjeta">💳 Tarjeta</option>
+                        <option value="Bizum">📱 Bizum</option>
+                    </select>
+                </div>
+                <button onclick="confirmarCobro()" class="btn btn-dark w-100 py-3 fw-bold">REGISTRAR PAGO</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalClienta" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0">
+            <div class="modal-header bg-dark text-white border-0">
+                <h5 class="modal-title">Ficha de Clienta</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div id="infoFidelidadModal"></div>
+            <div class="modal-body p-4">
+                <form id="formClienta">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <label class="form-label mb-0 small fw-bold text-muted">Nombre Completo</label>
+                                <input type="text" id="inputNombre" class="form-control form-control-sm">
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-6">
+                                    <label class="form-label mb-0 small fw-bold text-muted">Teléfono</label>
+                                    <input type="text" id="inputTelefono" class="form-control form-control-sm">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label mb-0 small fw-bold text-muted">Email</label>
+                                    <input type="email" id="inputEmail" class="form-control form-control-sm">
+                                </div>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label mb-0 small fw-bold text-muted">Cumpleaños (Día / Mes)</label>
+                                <div class="d-flex gap-2">
+                                    <select id="selectDia" class="form-select form-select-sm">
+                                        <option value="">Día</option>
+                                        <script>
+                                            for(let i=1; i<=31; i++) document.write(`<option value="${i}">${i}</option>`);
+                                        </script>
+                                    </select>
+                                    <select id="selectMes" class="form-select form-select-sm">
+                                        <option value="">Mes</option>
+                                        <option value="1">Ene</option><option value="2">Feb</option>
+                                        <option value="3">Mar</option><option value="4">Abr</option>
+                                        <option value="5">May</option><option value="6">Jun</option>
+                                        <option value="7">Jul</option><option value="8">Ago</option>
+                                        <option value="9">Sep</option><option value="10">Oct</option>
+                                        <option value="11">Nov</option><option value="12">Dic</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <label class="form-label mb-0 small fw-bold text-muted">Dirección</label>
+                                <input type="text" id="inputDireccion" class="form-control form-control-sm">
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-4">
+                                    <label class="form-label mb-0 small fw-bold text-muted">C.P.</label>
+                                    <input type="text" id="inputCP" class="form-control form-control-sm">
+                                </div>
+                                <div class="col-8">
+                                    <label class="form-label mb-0 small fw-bold text-muted">Localidad</label>
+                                    <input type="text" id="inputLocalidad" class="form-control form-control-sm" list="listaLocalidades">
+                                    <datalist id="listaLocalidades"></datalist>
+                                </div>
+                            </div>
+                            <div class="mb-0">
+                                <label class="form-label mb-0 small fw-bold text-muted">Observaciones / Notas</label>
+                                <textarea id="inputObservaciones" class="form-control form-control-sm" rows="2" style="resize: none;"></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2 mt-4">
+                        <button type="button" onclick="guardarClienta()" class="btn btn-dark flex-grow-1 py-2">
+                            <i class="fa-solid fa-save me-2"></i>Guardar Clienta
+                        </button>
+                        <button type="button" id="btnEliminarClienta" onclick="ejecutarEliminarClienta()" class="btn btn-outline-danger px-3">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<div class="modal fade" id="modalServicio" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0">
+            <div class="modal-header bg-dark text-white border-0">
+                <h5 class="modal-title">Nuevo Servicio</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="mb-3">
+                    <label class="label-custom">Nombre del Servicio</label>
+                    <input type="text" id="serNom" class="form-control" placeholder="Ej: Manicura">
+                </div>
+                <div class="mb-3">
+                    <label class="label-custom">Coste (€)</label>
+                    <input type="number" id="serCos" class="form-control" placeholder="0.00">
+                </div>
+
+                <div class="d-grid gap-2 mt-4">
+                    <button onclick="guardarServicio()" class="btn btn-dark py-2">Guardar Cambios</button>
+                    
+                    <button id="btnEliminarServicio" onclick="ejecutarEliminarServicio()" class="btn btn-outline-danger btn-sm">
+                        <i class="fa-solid fa-trash me-2"></i>Eliminar Servicio
                     </button>
                 </div>
             </div>
@@ -165,5 +326,6 @@
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
 <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
 <script src="app.js"></script>
+
 </body>
 </html>
