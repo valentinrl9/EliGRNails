@@ -655,8 +655,8 @@ async function listarClientas() {
     });
 
     // 4. ORDEN (alfabético)
-    clientasFiltradas.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
-
+    clientasFiltradas.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", 'es', { sensitivity: 'base' }));
+    
     // 5. MAPEADO (Diseño de Lujo)
     const htmlPromesas = clientasFiltradas.map(async (c) => {
         const idLimpio = parseInt(c.id);
