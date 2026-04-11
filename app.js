@@ -798,12 +798,21 @@ async function listarClientas() {
                                 ${c.nombre}
                             </span>
                         </div>
+
+                        <div style="flex: 0.8; color: #eec9c3; font-size: 0.75rem; white-space: nowrap; min-width: 70px;">
+                            ${c.fechaNacimiento ? `
+                                <i class="fa-solid fa-cake-candles" style="font-size: 0.65rem; margin-right: 5px;"></i>${c.fechaNacimiento}
+                            ` : ''}
+                        </div>
+
                         <div style="flex: 1; color: #888; font-size: 0.75rem; white-space: nowrap;">
                             <i class="fa-solid fa-phone" style="font-size: 0.65rem; margin-right: 5px; color: #c5a059;"></i>${c.telefono || ''}
                         </div>
+
                         <div style="width: 55px; text-align: center; border-left: 1px solid #333; border-right: 1px solid #333;">
                             <span style="font-size: 0.95rem; font-weight: bold; color: #ffffff;">${totalHistorico}</span>
                         </div>
+
                         <div style="flex: 2; display: flex; align-items: center; gap: 12px; justify-content: flex-end;">
                             <span style="font-size: 0.8rem; font-weight: bold; color: #eee; min-width: 38px; text-align: right;">
                                 ${estado.actual}/10
