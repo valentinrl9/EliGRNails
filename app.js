@@ -1304,15 +1304,16 @@ function renderizarGraficos(ventas) {
     const ahora = new Date();
     const añoActual = ahora.getFullYear();
 
-    // --- 1. NUEVA LÓGICA SEMANAL (Dinámica para todo el año) ---
-    // Calculamos cuántas semanas han pasado desde el 1 de enero
-    const inicioAño = new Date(añoActual, 0, 1);
-    const diasPasados = Math.floor((ahora - inicioAño) / (1000 * 60 * 60 * 24));
-    const totalSemanasHoy = Math.ceil(diasPasados / 7);
-    
-    // Creamos los arrays con el tamaño justo de semanas que llevamos
-    const ingresosSemanales = Array(totalSemanasHoy).fill(0);
-    const etiquetasSemanas = Array.from({length: totalSemanasHoy}, (_, i) => `S${i + 1}`);
+    function getWeekNumber(d) {
+        d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+        d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+        const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+        return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    }
+
+    const semanaActual = getWeekNumber(ahora);
+    const ingresosSemanales = Array(semanaActual).fill(0);
+    const etiquetasSemanas = Array.from({length: semanaActual}, (_, i) => `S${i + 1}`);
 
     // --- 2. LÓGICA MENSUAL (Ya la tienes bien) ---
     const mesesNombres = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
@@ -1323,15 +1324,15 @@ function renderizarGraficos(ventas) {
         const fVenta = new Date(v.fecha);
         
         if (fVenta.getFullYear() === añoActual) {
-            // Sumar para meses
+            // Sumar para meses (esto estaba bien)
             ingresosMensuales[fVenta.getMonth()] += v.importe;
 
-            // Sumar para semanas (calculando la semana del año de esa venta)
-            const diasDesdeInicio = Math.floor((fVenta - inicioAño) / (1000 * 60 * 60 * 24));
-            const indiceSemana = Math.floor(diasDesdeInicio / 7);
+            // NUEVA LÓGICA PARA SEMANAS:
+            const numSemana = getWeekNumber(fVenta);
             
-            if (indiceSemana >= 0 && indiceSemana < totalSemanasHoy) {
-                ingresosSemanales[indiceSemana] += v.importe;
+            // Si la semana de la venta es del año actual y no es futura
+            if (numSemana >= 1 && numSemana <= semanaActual) {
+                ingresosSemanales[numSemana - 1] += v.importe;
             }
         }
     });
