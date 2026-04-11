@@ -97,8 +97,6 @@ async function obtenerEstadoFidelidad(clienteId) {
 let calendar;
 let citaParaCobrar = null;
 
-
-
 // =========================================
 // 2. INICIALIZACIÓN AL CARGAR LA PÁGINA
 // =========================================
@@ -149,14 +147,23 @@ function initCalendar() {
             // 1. Resetear el formulario
             const inputs = modalEl.querySelectorAll('input, select');
             inputs.forEach(i => i.disabled = false);
+
+            // --- AQUÍ LAS LÍNEAS QUE FALTABAN PARA LIMPIAR LOS SELECTORES ---
+            document.getElementById('selCli').value = ""; // Limpia la clienta
+            document.getElementById('selSer').value = ""; // Limpia el servicio
+            // ----------------------------------------------------------------
+
             document.getElementById('modalCitaTitulo').innerText = "Nueva Cita";
             document.getElementById('btnEliminarCita').style.display = 'none';
             document.getElementById('btnCobrarCita').style.display = 'none';
+            
+            // Buscamos también el botón de desbloqueo si lo tienes para ocultarlo
+            const btnDesbloquear = document.getElementById('btnForzarDesbloqueo');
+            if(btnDesbloquear) btnDesbloquear.style.display = 'none';
+
             document.querySelector('button[onclick="agendarCita()"]').style.display = 'block';
 
-            // 2. CORRECCIÓN DE HORA (EL ARREGLO)
-            // Usamos la fecha que viene en 'info.date' pero la formateamos a mano
-            // para evitar que el navegador le sume o reste horas por la zona horaria.
+            // 2. CORRECCIÓN DE HORA (Tu código intacto)
             const d = info.date;
             const año = d.getFullYear();
             const mes = String(d.getMonth() + 1).padStart(2, '0');
@@ -164,13 +171,12 @@ function initCalendar() {
             const hora = String(d.getHours()).padStart(2, '0');
             const minutos = String(d.getMinutes()).padStart(2, '0');
 
-            // Creamos el formato exacto que necesita el input datetime-local: YYYY-MM-DDTHH:mm
             const fechaLocalCorrecta = `${año}-${mes}-${dia}T${hora}:${minutos}`;
-            
             document.getElementById('citaFecha').value = fechaLocalCorrecta;
 
-            // 3. Mostrar el modal
-            new bootstrap.Modal(modalEl).show();
+            // 3. Mostrar el modal (Usando instancia para evitar parpadeos)
+            const modalInstance = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+            modalInstance.show();
         },
 
         eventClick: function(info) {
@@ -223,7 +229,31 @@ function initCalendar() {
 async function prepararEdicionCita(id) {
     const modalEl = document.getElementById('modalCita');
     
-    // 1. CARGAR LISTAS ORDENADAS (Esto limpia lo anterior y pone los guiones)
+    // =========================================================
+    // 1. RESET DE EMERGENCIA (Limpieza total antes de empezar)
+    // =========================================================
+    modalEl.removeAttribute('data-edit-id'); // Borramos el rastro de la cita anterior
+    modalEl.querySelectorAll('input, select').forEach(i => {
+        i.disabled = false; // Desbloqueamos todo
+        i.value = "";       // Vaciamos todo
+    });
+
+    // Resetear visibilidad de botones por defecto
+    const btnGuardar = modalEl.querySelector('button[onclick="agendarCita()"]');
+    const btnEliminar = document.getElementById('btnEliminarCita');
+    const btnCobrar = document.getElementById('btnCobrarCita');
+    const btnDesbloquear = document.getElementById('btnForzarDesbloqueo');
+
+    if(btnGuardar) btnGuardar.style.display = 'block';
+    if(btnEliminar) btnEliminar.style.display = 'none';
+    if(btnCobrar) btnCobrar.style.display = 'none';
+    if(btnDesbloquear) btnDesbloquear.style.display = 'none';
+    
+    document.getElementById('modalCitaTitulo').innerText = "Nueva Cita";
+
+    // =========================================================
+    // 2. CARGAR LISTAS (Actualizar Selectores)
+    // =========================================================
     const clientas = await db.clientas.toArray();
     clientas.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", 'es', { sensitivity: 'base' }));
     
@@ -234,54 +264,42 @@ async function prepararEdicionCita(id) {
     document.getElementById('selSer').innerHTML = '<option value="">--- Selecciona Servicio ---</option>' + 
         servicios.map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
 
-    // 2. SI ES UNA CITA EXISTENTE
+    // =========================================================
+    // 3. SI ES EDICIÓN: RELLENAR Y BLOQUEAR SEGÚN CORRESPONDA
+    // =========================================================
     if (id) {
         const cita = await db.agenda.get(parseInt(id));
         if (!cita) return;
 
-        modalEl.setAttribute('data-edit-id', id);
+        modalEl.setAttribute('data-edit-id', id); // Aquí sí ponemos el ID
         
-        // Configurar UI de Cobrado/Pendiente (tu código actual)
-        const btnGuardar = modalEl.querySelector('button[onclick="agendarCita()"]');
-        const btnEliminar = document.getElementById('btnEliminarCita');
-        const btnCobrar = document.getElementById('btnCobrarCita');
-        const inputs = modalEl.querySelectorAll('input, select');
-
         if (cita.cobrado) {
             document.getElementById('modalCitaTitulo').innerText = "Cita Finalizada (Bloqueada)";
-            inputs.forEach(i => i.disabled = true);
-            btnGuardar.style.display = 'none';
-            btnEliminar.style.display = 'none';
-            btnCobrar.disabled = true;
+            modalEl.querySelectorAll('input, select').forEach(i => i.disabled = true);
+            if(btnGuardar) btnGuardar.style.display = 'none';
+            if(btnEliminar) btnEliminar.style.display = 'none';
+            if(btnCobrar) btnCobrar.style.display = 'none';
+            if(btnDesbloquear) btnDesbloquear.style.display = 'block';
         } else {
             document.getElementById('modalCitaTitulo').innerText = "Gestionar Cita";
-            inputs.forEach(i => i.disabled = false);
-            btnGuardar.style.display = 'block';
-            btnEliminar.style.display = 'block';
-            btnCobrar.disabled = false;
+            if(btnEliminar) btnEliminar.style.display = 'block';
+            if(btnCobrar) btnCobrar.style.display = 'block';
         }
 
-        // Poner los valores de la cita
+        // Ponemos los valores de la cita
         document.getElementById('selCli').value = cita.clienteId;
         document.getElementById('selSer').value = cita.servicioId;
         document.getElementById('citaFecha').value = cita.fecha;
-
-    } else {
-        // 3. SI ES UNA CITA NUEVA (Limpieza total)
-        modalEl.removeAttribute('data-edit-id');
-        document.getElementById('modalCitaTitulo').innerText = "Nueva Cita";
-        document.getElementById('selCli').value = "";
-        document.getElementById('selSer').value = "";
-        document.getElementById('citaFecha').value = "";
-        
-        const btnEliminar = document.getElementById('btnEliminarCita');
-        const btnCobrar = document.getElementById('btnCobrarCita');
-        if(btnEliminar) btnEliminar.style.display = 'none';
-        if(btnCobrar) btnCobrar.style.display = 'none';
     }
 
-    new bootstrap.Modal(modalEl).show();
-}   
+    // =========================================================
+    // 4. MOSTRAR MODAL
+    // =========================================================
+    // Usamos la instancia existente o creamos una nueva
+    const modalInstance = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+    modalInstance.show();
+}
+
 
 async function agendarCita() {
     const modalEl = document.getElementById('modalCita');
@@ -394,6 +412,19 @@ async function confirmarCobro() {
         // 2. Marcamos la cita como cobrada
         await db.agenda.update(parseInt(citaParaCobrar.id), { cobrado: true });
         
+        // Forzamos la actualización de datos
+        if (typeof cargarHistorialVentas === 'function') {
+            await cargarHistorialVentas(); 
+        }
+
+        // Forzamos la actualización de la lista de clientas (Fidelidad)
+        if (typeof listarClientas === 'function') {
+            await listarClientas();
+        }
+        
+        // Si tienes el calendario, refresca también
+        if (typeof calendar !== 'undefined') calendar.refetchEvents();
+
         // 3. Actualizamos el calendario
         if (calendar) calendar.refetchEvents();
         
@@ -435,15 +466,18 @@ async function revertirCobro(ventaId, citaId) {
             await db.agenda.update(parseInt(citaId), { cobrado: false });
         }
 
-        // 3. Refrescar la tabla de historial de ventas
+        // Forzamos la actualización de datos
         if (typeof cargarHistorialVentas === 'function') {
-            await cargarHistorialVentas();
+            await cargarHistorialVentas(); 
+        }
+
+        // Forzamos la actualización de la lista de clientas (Fidelidad)
+        if (typeof listarClientas === 'function') {
+            await listarClientas();
         }
         
-        // 4. Refrescar el calendario para que la cita pierda el color de "cobrada"
-        if (typeof calendar !== 'undefined' && calendar) {
-            calendar.refetchEvents();
-        }
+        // Si tienes el calendario, refresca también
+        if (typeof calendar !== 'undefined') calendar.refetchEvents();
 
         // 5. ACTUALIZACIÓN DE BARRA: Refrescamos la lista de clientas
         // Como la venta ya no existe (o el importe > 0 ya no está), la barra bajará sola
@@ -461,11 +495,22 @@ async function revertirCobro(ventaId, citaId) {
 
 async function cargarHistorialVentas() {
     const ventas = await db.ventas.orderBy('fecha').reverse().toArray();
-    const tablaOriginal = document.getElementById('tablaVentasBody');
-    if (!tablaOriginal) return;
     
-    // Buscamos el contenedor para reemplazar la tabla por el acordeón
-    const contenedorPadre = tablaOriginal.closest('.table-responsive') || tablaOriginal.parentElement.parentElement;
+    // CAMBIO CLAVE: Buscamos el acordeón o la tabla
+    let contenedor = document.getElementById('acordeonVentas');
+    const tablaOriginal = document.getElementById('tablaVentasBody');
+    
+    // Si ya existe el acordeón, lo usamos como destino. 
+    // Si no, buscamos el contenedor de la tabla original.
+    let destino;
+    if (contenedor) {
+        destino = contenedor.parentElement;
+    } else if (tablaOriginal) {
+        destino = tablaOriginal.closest('.table-responsive') || tablaOriginal.parentElement.parentElement;
+    } else {
+        // Si no encuentra nada de nada, salimos para evitar errores
+        return;
+    }
 
     let totalAcumulado = 0;
 
@@ -563,7 +608,7 @@ async function cargarHistorialVentas() {
     };
 
     // 5. Renderizado final
-    contenedorPadre.innerHTML = `
+    destino.innerHTML = `
         <div class="accordion accordion-flush" id="acordeonVentas">
             ${crearSeccion('HOY', 'hoy', grupos.hoy, true)}
             ${crearSeccion('ESTA SEMANA (Acumulado)', 'sem', grupos.semana)}
@@ -577,9 +622,13 @@ async function cargarHistorialVentas() {
     const elTotal = document.getElementById('totalCajaGeneral');
     if (elTotal) elTotal.innerText = `${totalAcumulado.toFixed(2)}€`;
 
-    // 7. Renderizar el gráfico (AQUÍ ES EL SITIO IDEAL)
-    // Le pasamos 'ventas' porque es el array con todos los cobros
-renderizarGraficos(ventas);
+    // USAR UN PEQUEÑO TIMEOUT PARA LOS GRÁFICOS
+    // Esto permite que la tabla y el total se dibujen primero sin esperar al gráfico
+    setTimeout(() => {
+        if (typeof renderizarGraficos === 'function') {
+            renderizarGraficos(ventas);
+        }
+    }, 100); 
 }
 
 // =========================================
@@ -1018,16 +1067,32 @@ async function actualizarSelectores() {
 }
 
 async function forzarDesbloqueo() {
-    const id = document.getElementById('modalCita').getAttribute('data-edit-id');
-    if (confirm("Esta cita parece bloqueada. ¿Quieres desbloquearla para poder editarla o borrarla?")) {
-        await db.agenda.update(parseInt(id), { cobrado: false });
-        
-        // Cerramos el modal y refrescamos
-        bootstrap.Modal.getInstance(document.getElementById('modalCita')).hide();
-        calendar.refetchEvents();
-        alert("Cita desbloqueada. Ya puedes gestionarla normalmente.");
+    const idCita = document.getElementById('modalCita').getAttribute('data-edit-id');
+    if (!idCita) return;
+
+    if (confirm("Esta cita está cobrada. Si la desbloqueas para editarla, se eliminará el registro de pago de las estadísticas. ¿Deseas continuar?")) {
+        try {
+            // 1. Borrar la venta vinculada para que los gráficos bajen
+            const venta = await db.ventas.where('citaId').equals(parseInt(idCita)).first();
+            if (venta) {
+                await db.ventas.delete(venta.id);
+            }
+
+            // 2. Cambiar estado en la agenda
+            await db.agenda.update(parseInt(idCita), { cobrado: false });
+
+            // 3. Cerrar y refrescar todo
+            bootstrap.Modal.getInstance(document.getElementById('modalCita')).hide();
+            if (calendar) calendar.refetchEvents();
+            if (typeof cargarHistorialVentas === 'function') await cargarHistorialVentas();
+            if (typeof listarClientas === 'function') await listarClientas();
+
+        } catch (error) {
+            console.error("Error al desbloquear:", error);
+        }
     }
 }
+
 
  // COPIA DE SEGURIDAD RECTIFICADA
 async function exportarBackup() {
