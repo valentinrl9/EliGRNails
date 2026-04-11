@@ -461,38 +461,126 @@ async function revertirCobro(ventaId, citaId) {
 
 async function cargarHistorialVentas() {
     const ventas = await db.ventas.orderBy('fecha').reverse().toArray();
-    const tabla = document.getElementById('tablaVentasBody');
+    const tablaOriginal = document.getElementById('tablaVentasBody');
+    if (!tablaOriginal) return;
+    
+    // Buscamos el contenedor para reemplazar la tabla por el acordeón
+    const contenedorPadre = tablaOriginal.closest('.table-responsive') || tablaOriginal.parentElement.parentElement;
+
     let totalAcumulado = 0;
 
-    const filasHTML = await Promise.all(ventas.map(async (v) => {
+    // 1. Marcas de tiempo para vistas acumulativas
+    const ahora = new Date();
+    const hoyInicio = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate()).getTime();
+
+    const lunes = new Date(ahora);
+    lunes.setDate(ahora.getDate() - (ahora.getDay() === 0 ? 6 : ahora.getDay() - 1));
+    lunes.setHours(0,0,0,0);
+    const inicioSemana = lunes.getTime();
+
+    const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1).getTime();
+    const inicioAño = new Date(ahora.getFullYear(), 0, 1).getTime();
+
+    const grupos = { hoy: [], semana: [], mes: [], año: [], resto: [] };
+
+    // 2. Procesar datos (Calculamos el total real una sola vez aquí)
+    await Promise.all(ventas.map(async (v) => {
         const cli = await db.clientas.get(v.clienteId);
         const ser = await db.servicios.get(v.servicioId);
+        
+        // El total general SOLO se suma una vez por cada venta real
         totalAcumulado += v.importe;
         
-        const fechaFormateada = new Date(v.fecha).toLocaleString('es-ES', {
-            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
-        });
+        const fVenta = new Date(v.fecha).getTime();
+        const item = { v, cli, ser };
 
-        return `
-            <tr>
-                <td>${fechaFormateada}</td>
-                <td>${cli ? cli.nombre : 'Eliminada'}</td>
-                <td>${ser ? ser.nombre : 'Eliminado'}</td>
-                <td><span class="badge bg-secondary">${v.metodoPago}</span></td>
-                <td class="fw-bold">${v.importe}€</td>
-                <td class="text-end">
-                    <button class="btn btn-sm btn-outline-danger" onclick="revertirCobro(${v.id}, ${v.citaId})">
-                        <i class="fa-solid fa-rotate-left"></i> Anular
-                    </button>
-                </td>
-            </tr>
-        `;
+        // 3. Lógica ACUMULATIVA (Sin "else")
+        // Una misma venta puede entrar en varios grupos a la vez
+        if (fVenta >= hoyInicio) {
+            grupos.hoy.push(item);
+        }
+        if (fVenta >= inicioSemana) {
+            grupos.semana.push(item);
+        }
+        if (fVenta >= inicioMes) {
+            grupos.mes.push(item);
+        }
+        if (fVenta >= inicioAño) {
+            grupos.año.push(item);
+        }
+        if (fVenta < inicioAño) {
+            grupos.resto.push(item); // Solo lo que sea de años anteriores
+        }
     }));
 
-    tabla.innerHTML = filasHTML.join('');
-    document.getElementById('totalCajaGeneral').innerText = `${totalAcumulado.toFixed(2)}€`;
-}
+    // 4. Función para generar las secciones
+    const crearSeccion = (titulo, id, datos, abierto = false) => {
+        const suma = datos.reduce((acc, item) => acc + item.v.importe, 0);
+        if (datos.length === 0 && id !== 'hoy') return ''; 
 
+        return `
+            <div class="accordion-item bg-dark border-secondary mb-2">
+                <h2 class="accordion-header">
+                    <button class="accordion-button ${abierto ? '' : 'collapsed'} bg-black text-white" 
+                            type="button" data-bs-toggle="collapse" data-bs-target="#coll-${id}">
+                        <div class="d-flex justify-content-between w-100 me-3 align-items-center">
+                            <span>${titulo}</span>
+                            <span class="text-warning fw-bold">${suma.toFixed(2)}€</span>
+                        </div>
+                    </button>
+                </h2>
+                <div id="coll-${id}" class="accordion-collapse collapse ${abierto ? 'show' : ''}" data-bs-parent="#acordeonVentas">
+                    <div class="accordion-body p-0">
+                        <table class="table table-dark table-hover m-0" style="font-size: 0.85rem;">
+                            <thead>
+                                <tr style="font-size: 0.7rem; color: #888; border-bottom: 1px solid #333;">
+                                    <th class="ps-3">FECHA</th>
+                                    <th>CLIENTA</th>
+                                    <th>SERVICIO</th>
+                                    <th>IMPORTE</th>
+                                    <th class="text-end pe-3">ACCIÓN</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${datos.map(item => `
+                                    <tr>
+                                        <td class="ps-3">${new Date(item.v.fecha).toLocaleDateString('es-ES', {day:'2-digit', month:'2-digit'})} ${new Date(item.v.fecha).toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'})}</td>
+                                        <td class="fw-bold">${item.cli ? item.cli.nombre : '---'}</td>
+                                        <td>${item.ser ? item.ser.nombre : '---'}</td>
+                                        <td class="fw-bold">${item.v.importe.toFixed(2)}€</td>
+                                        <td class="text-end pe-3">
+                                            <button class="btn btn-sm btn-outline-danger" onclick="revertirCobro(${item.v.id}, ${item.v.citaId})">
+                                                <i class="fa-solid fa-rotate-left"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>`;
+    };
+
+    // 5. Renderizado final
+    contenedorPadre.innerHTML = `
+        <div class="accordion accordion-flush" id="acordeonVentas">
+            ${crearSeccion('HOY', 'hoy', grupos.hoy, true)}
+            ${crearSeccion('ESTA SEMANA (Acumulado)', 'sem', grupos.semana)}
+            ${crearSeccion('ESTE MES (Acumulado)', 'mes', grupos.mes)}
+            ${crearSeccion('ESTE AÑO (Acumulado)', 'anio', grupos.año)}
+            ${crearSeccion('AÑOS ANTERIORES', 'resto', grupos.resto)}
+        </div>
+    `;
+
+    // 6. Actualizar el total general sin duplicados
+    const elTotal = document.getElementById('totalCajaGeneral');
+    if (elTotal) elTotal.innerText = `${totalAcumulado.toFixed(2)}€`;
+
+    // 7. Renderizar el gráfico (AQUÍ ES EL SITIO IDEAL)
+    // Le pasamos 'ventas' porque es el array con todos los cobros
+renderizarGraficos(ventas);
+}
 
 // =========================================
 // 6. GESTIÓN DE CLIENTAS Y SERVICIOS
@@ -1125,4 +1213,118 @@ function enviarWhatsAppCumple(telefono, nombre, id) {
         boton.className = "btn btn-info w-100 text-white mt-2"; 
         boton.setAttribute('data-paso', '2');
     }
+}
+
+
+//GRAFICOS
+
+let chartSemana; // Variable global para el gráfico semanal
+let chartMes;    // Variable global para el gráfico mensual
+Chart.register(ChartDataLabels); 
+
+function renderizarGraficos(ventas) {
+    const canvasSem = document.getElementById('graficoSemanas');
+    const canvasMes = document.getElementById('graficoMeses');
+    if (!canvasSem || !canvasMes) return;
+
+    const ahora = new Date();
+    const añoActual = ahora.getFullYear();
+
+    // --- 1. NUEVA LÓGICA SEMANAL (Dinámica para todo el año) ---
+    // Calculamos cuántas semanas han pasado desde el 1 de enero
+    const inicioAño = new Date(añoActual, 0, 1);
+    const diasPasados = Math.floor((ahora - inicioAño) / (1000 * 60 * 60 * 24));
+    const totalSemanasHoy = Math.ceil(diasPasados / 7);
+    
+    // Creamos los arrays con el tamaño justo de semanas que llevamos
+    const ingresosSemanales = Array(totalSemanasHoy).fill(0);
+    const etiquetasSemanas = Array.from({length: totalSemanasHoy}, (_, i) => `S${i + 1}`);
+
+    // --- 2. LÓGICA MENSUAL (Ya la tienes bien) ---
+    const mesesNombres = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+    const ingresosMensuales = Array(12).fill(0);
+
+    // --- 3. PROCESAR DATOS ---
+    ventas.forEach(v => {
+        const fVenta = new Date(v.fecha);
+        
+        if (fVenta.getFullYear() === añoActual) {
+            // Sumar para meses
+            ingresosMensuales[fVenta.getMonth()] += v.importe;
+
+            // Sumar para semanas (calculando la semana del año de esa venta)
+            const diasDesdeInicio = Math.floor((fVenta - inicioAño) / (1000 * 60 * 60 * 24));
+            const indiceSemana = Math.floor(diasDesdeInicio / 7);
+            
+            if (indiceSemana >= 0 && indiceSemana < totalSemanasHoy) {
+                ingresosSemanales[indiceSemana] += v.importe;
+            }
+        }
+    });
+
+    // --- 4. DIBUJAR GRÁFICO SEMANAL ---
+    if (chartSemana) chartSemana.destroy();
+    chartSemana = new Chart(canvasSem.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: etiquetasSemanas, // Ahora mostrará S1, S2, S3... hasta hoy
+            datasets: [{
+                data: ingresosSemanales,
+                borderColor: '#c5a059',
+                backgroundColor: 'rgba(197, 160, 89, 0.1)',
+                borderWidth: 2, // Un poco más fino porque habrá más puntos
+                tension: 0,
+                fill: true,
+                datalabels: { // <--- AÑADIR ESTO
+                    align: 'top',
+                    anchor: 'end',
+                    formatter: (v) => v > 0 ? v + '€' : '',
+                    color: '#c5a059',
+                    font: { size: 10, weight: 'bold' }
+                }
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { beginAtZero: true, grid: { color: '#333' }, ticks: { color: '#888' } },
+                x: { grid: { display: false }, ticks: { color: '#888', font: { size: 10 } } }
+            }
+        }
+    });
+
+    // --- 5. DIBUJAR GRÁFICO MENSUAL (Manteniéndolo como ya te gusta) ---
+    if (chartMes) chartMes.destroy();
+    chartMes = new Chart(canvasMes.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: mesesNombres,
+            datasets: [{
+                data: ingresosMensuales,
+                borderColor: '#fcf6ba',
+                backgroundColor: 'rgba(252, 246, 186, 0.1)',
+                borderWidth: 3,
+                tension: 0,
+                fill: true,
+                datalabels: { // <--- AÑADIR ESTO
+                    align: 'top',
+                    anchor: 'end',
+                    formatter: (v) => v > 0 ? v + '€' : '',
+                    color: '#fcf6ba',
+                    font: { size: 11, weight: 'bold' }
+                }
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { beginAtZero: true, grid: { color: '#333' }, ticks: { color: '#888' } },
+                x: { grid: { display: false }, ticks: { color: '#888' } }
+            }
+        }
+    });
 }
