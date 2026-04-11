@@ -1267,35 +1267,55 @@ function renderizarGraficos(ventas) {
     chartSemana = new Chart(canvasSem.getContext('2d'), {
         type: 'line',
         data: {
-            labels: etiquetasSemanas, // Ahora mostrará S1, S2, S3... hasta hoy
+            labels: etiquetasSemanas, 
             datasets: [{
                 data: ingresosSemanales,
-                borderColor: '#c5a059',
-                backgroundColor: 'rgba(197, 160, 89, 0.1)',
-                borderWidth: 2, // Un poco más fino porque habrá más puntos
+                borderColor: '#eec9c3', // Rosa Nude
+                backgroundColor: 'rgba(236, 95, 156, 0.5)',
+                borderWidth: 2,
+                pointBackgroundColor: '#c5a059', // Dorado Eli-GR
+                pointRadius: 4,
                 tension: 0,
                 fill: true,
-                datalabels: { // <--- AÑADIR ESTO
+                datalabels: {
                     align: 'top',
                     anchor: 'end',
                     formatter: (v) => v > 0 ? v + '€' : '',
-                    color: '#c5a059',
-                    font: { size: 10, weight: 'bold' }
+                    color: '#ffffff', // Blanco
+                    font: { size: 10}
                 }
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            backgroundColor: 'transparent',
+            layout: { padding: { top: 25, left: 10, right: 10, bottom: 10 } },
+            plugins: { 
+                legend: { display: false },
+                datalabels: {
+                    align: 'top',
+                    anchor: 'end',
+                    color: '#ffffff',
+                    font: { size: 10},
+                    formatter: (v) => v > 0 ? v + '€' : ''
+                }
+            },
             scales: {
-                y: { beginAtZero: true, grid: { color: '#333' }, ticks: { color: '#888' } },
-                x: { grid: { display: false }, ticks: { color: '#888', font: { size: 10 } } }
+                y: { 
+                    beginAtZero: true, 
+                    grid: { color: '#222' }, 
+                    ticks: { color: '#ffffff', font: { size: 10 } } 
+                },
+                x: { 
+                    grid: { display: false }, 
+                    ticks: { color: '#ffffff', font: { size: 10 } } 
+                }
             }
         }
     });
 
-    // --- 5. DIBUJAR GRÁFICO MENSUAL (Manteniéndolo como ya te gusta) ---
+    // --- 5. DIBUJAR GRÁFICO MENSUAL ---
     if (chartMes) chartMes.destroy();
     chartMes = new Chart(canvasMes.getContext('2d'), {
         type: 'line',
@@ -1303,27 +1323,47 @@ function renderizarGraficos(ventas) {
             labels: mesesNombres,
             datasets: [{
                 data: ingresosMensuales,
-                borderColor: '#fcf6ba',
-                backgroundColor: 'rgba(252, 246, 186, 0.1)',
-                borderWidth: 3,
+                borderColor: '#eec9c3', // Rosa Nude
+                backgroundColor: 'rgba(236, 95, 156, 0.5)',
+                borderWidth: 2,
+                pointBackgroundColor: '#c5a059', // Dorado Eli-GR
+                pointRadius: 4,
                 tension: 0,
                 fill: true,
-                datalabels: { // <--- AÑADIR ESTO
+                datalabels: {
                     align: 'top',
                     anchor: 'end',
                     formatter: (v) => v > 0 ? v + '€' : '',
-                    color: '#fcf6ba',
-                    font: { size: 11, weight: 'bold' }
+                    color: '#ffffff',
+                    font: { size: 11}
                 }
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            layout: { padding: { top: 25, left: 10, right: 10, bottom: 10 } },
+            backgroundColor: 'transparent',
+            plugins: { 
+                legend: { display: false },
+                datalabels: {
+                    align: 'top',
+                    anchor: 'end',
+                    color: '#ffffff',
+                    font: { size: 11},
+                    formatter: (v) => v > 0 ? v + '€' : ''
+                }
+            },
             scales: {
-                y: { beginAtZero: true, grid: { color: '#333' }, ticks: { color: '#888' } },
-                x: { grid: { display: false }, ticks: { color: '#888' } }
+                y: { 
+                    beginAtZero: true, 
+                    grid: { color: '#222' }, 
+                    ticks: { color: '#ffffff', font: { size: 10 } } 
+                },
+                x: { 
+                    grid: { display: false }, 
+                    ticks: { color: '#ffffff', font: { size: 10 } } 
+                }
             }
         }
     });

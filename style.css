@@ -407,3 +407,13 @@ body {
     50% { transform: scale(1.05); opacity: 0.8; }
     100% { transform: scale(1); opacity: 1; }
 }
+
+/* Fuerza el fondo negro real en las tarjetas de los gráficos */
+.card.bg-dark {
+    background-color: #000000 !important;
+}
+
+/* Asegura que el canvas no tenga fondo propio */
+canvas {
+    background-color: transparent !important;
+}
