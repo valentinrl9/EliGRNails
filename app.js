@@ -1644,17 +1644,45 @@ window.addEventListener('load', () => {
     
     // Cargamos GAPI (Calendar API)
     gapi.load('client', async () => {
-        await gapi.client.init({
-            discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'],
-        });
-        gapiInited = true;
-        console.log("🚀 Google Calendar API lista");
+        try {
+            await gapi.client.init({
+                discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'],
+            });
+            gapiInited = true;
+            console.log("🚀 Google Calendar API lista");
+
+            // --- INTENTO DE AUTO-CONEXIÓN SILENCIOSA ---
+            // Si el usuario ya inició sesión antes, se conectará solo
+            setTimeout(() => {
+                if (tokenClient) {
+                    console.log("Intentando auto-conexión...");
+                    tokenClient.requestAccessToken({ prompt: '' });
+                }
+            }, 1500);
+
+        } catch (error) {
+            console.error("Error inicializando GAPI:", error);
+        }
     });
+
+    // Vincular el botón manualmente por seguridad
+    const btn = document.getElementById('btnConectarGoogle');
+    if (btn) {
+        btn.onclick = manejarAuthClick;
+    }
 });
 
-// 5. Vincular el botón
-document.getElementById('btnConectarGoogle').onclick = manejarAuthClick;
+// 5. Función para el clic manual del botón
+function manejarAuthClick() {
+    if (tokenClient) {
+        // Al hacer clic, sí mostramos el selector de cuenta (prompt)
+        tokenClient.requestAccessToken({ prompt: 'select_account' });
+    } else {
+        console.error("El cliente de Google no está listo.");
+    }
+}
 
+// 6. Eliminar evento de Google
 async function eliminarEventoGoogle(googleEventId) {
     if (!gapi.client.calendar || !googleEventId) return;
 
@@ -1665,6 +1693,11 @@ async function eliminarEventoGoogle(googleEventId) {
         });
         console.log('🗑️ Evento eliminado de Google Calendar');
     } catch (err) {
-        console.error('❌ Error al eliminar en Google:', err);
+        // Si el error es 404 es que ya no existe en Google, lo consideramos éxito
+        if (err.status === 404) {
+            console.warn('El evento ya no existía en Google Calendar.');
+        } else {
+            console.error('❌ Error al eliminar en Google:', err);
+        }
     }
 }
