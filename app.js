@@ -1613,14 +1613,13 @@ function inicializarGoogle() {
 // Función auxiliar para no repetir código del botón
 function actualizarBotonGoogle(conectado) {
     const btn = document.getElementById('btnConectarGoogle');
-    if (btn) {
-        if (conectado) {
-            btn.innerText = "✅ Calendario Conectado";
-            btn.style.backgroundColor = "#4CAF50";
-        } else {
-            btn.innerText = "Conectar Calendario";
-            btn.style.backgroundColor = ""; // Color original
-        }
+    if (!btn) return;
+
+    if (conectado) {
+        btn.classList.add('connected');
+        // No añadimos texto, el CSS se encarga del color verde y el punto
+    } else {
+        btn.classList.remove('connected');
     }
 }
 

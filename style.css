@@ -417,3 +417,57 @@ body {
 canvas {
     background-color: transparent !important;
 }
+
+
+/* CSS para botón de sincronizar */
+/* Contenedor del botón circular */
+.btn-google-sync.icon-only {
+    position: relative;
+    width: 35px;
+    height: 35px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #1a1a1a;
+    border: 1px solid #c5a059;
+    color: #c5a059;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    vertical-align: middle;
+    margin-left: 15px; /* Separación del logo */
+}
+
+/* Icono G de Google */
+.btn-google-sync.icon-only i {
+    font-size: 16px;
+}
+
+/* El punto de estado (pequeño y en la esquina) */
+.status-dot {
+    position: absolute;
+    bottom: -1px;
+    right: -1px;
+    width: 10px;
+    height: 10px;
+    background-color: #555; /* Gris cuando no hay conexión */
+    border: 2px solid #1a1a1a; /* Para que resalte sobre el círculo */
+    border-radius: 50%;
+}
+
+/* Cuando está CONECTADO */
+.btn-google-sync.connected {
+    border-color: #4CAF50;
+    color: #4CAF50;
+}
+
+.btn-google-sync.connected .status-dot {
+    background-color: #4CAF50; /* Verde */
+    box-shadow: 0 0 5px #4CAF50;
+}
+
+/* Quitar cualquier estilo antiguo que pusimos antes por JS */
+#btnConectarGoogle {
+    background-image: none !important;
+}
