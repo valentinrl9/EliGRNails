@@ -18,6 +18,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://apis.google.com/js/api.js" async defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
 </head>
@@ -34,6 +36,10 @@
                 data-bs-toggle="collapse" data-bs-target="#navbarNav" 
                 aria-label="Abrir menú de navegación" title="Abrir menú">
             <i class="fa-solid fa-bars text-white"></i>
+        </button>
+
+        <button id="btnConectarGoogle" class="btn-secundario">
+            <i class="fab fa-google"></i> Conectar Calendario
         </button>
 
         <div class="collapse navbar-collapse" id="navbarNav">

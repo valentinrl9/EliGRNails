@@ -1,6 +1,16 @@
 // =========================================
 // 1. CONFIGURACIÓN DE BASE DE DATOS (V2)
 // =========================================
+
+//Constantes de Google para el calendario
+const CLIENT_ID = '674688988885-fmjjdoe5svfabqj1t619c940enn6gc3d.apps.googleusercontent.com';
+const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
+const SCOPES = 'https://www.googleapis.com/auth/calendar.events';
+
+let tokenClient;
+let gapiInited = false;
+let gsiInited = false;
+
 const db = new Dexie("SalonDB");
 
 // Subimos a versión 3
@@ -305,7 +315,6 @@ async function agendarCita() {
     const modalEl = document.getElementById('modalCita');
     const editId = modalEl.getAttribute('data-edit-id');
     
-    // 1. Recogemos los valores básicos
     const clienteId = parseInt(document.getElementById('selCli').value);
     const servicioId = parseInt(document.getElementById('selSer').value);
     const fecha = document.getElementById('citaFecha').value;
@@ -315,17 +324,29 @@ async function agendarCita() {
         return;
     }
 
+    // --- NUEVO: Obtener datos para Google Calendar ---
+    const cliente = await db.clientas.get(clienteId);
+    const servicio = await db.servicios.get(servicioId);
+    
+    const datosCita = {
+        nombreClienta: cliente ? cliente.nombre : "Cliente",
+        servicio: servicio ? servicio.nombre : "Servicio",
+        fechaInicio: fecha, // Formato que viene del input datetime-local
+        // Calculamos el fin (por ejemplo, +1 hora)
+        fechaFin: new Date(new Date(fecha).getTime() + 60 * 60 * 1000).toISOString()
+    };
+
+    let idFinal;
+
     if (editId) {
-        // 2. Si editamos, solo actualizamos los campos que cambian.
-        // NO tocamos el campo 'cobrado' para que no se desconfigure.
-        await db.agenda.update(parseInt(editId), {
+        idFinal = parseInt(editId);
+        await db.agenda.update(idFinal, {
             clienteId: clienteId,
             servicioId: servicioId,
             fecha: fecha
         });
     } else {
-        // 3. Si es nueva, la creamos con cobrado: false por defecto
-        await db.agenda.add({
+        idFinal = await db.agenda.add({
             clienteId: clienteId,
             servicioId: servicioId,
             fecha: fecha,
@@ -333,7 +354,30 @@ async function agendarCita() {
         });
     }
 
-    // 4. Refrescamos y cerramos
+    // --- INTEGRACIÓN CON GOOGLE CALENDAR MEJORADA ---
+    if (typeof gapi !== 'undefined') {
+        try {
+            // Si no hay token, intentamos pedirlo silenciosamente
+            if (gapi.client.getToken() === null && tokenClient) {
+                console.log("Sesión no detectada, intentando auto-conexión...");
+                tokenClient.requestAccessToken({ prompt: '' });
+                // Esperamos un segundo para que Google responda
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+
+            // Si ahora sí tenemos acceso, creamos el evento
+            if (gapi.client.calendar && gapi.client.getToken() !== null) {
+                const googleId = await crearEventoGoogle(datosCita);
+                if (googleId) {
+                    await db.agenda.update(idFinal, { googleEventId: googleId });
+                    console.log("✅ Sincronizado con Google Calendar correctamente");
+                }
+            }
+        } catch (error) {
+            console.error("Error al sincronizar con Google:", error);
+        }
+    }
+
     calendar.refetchEvents();
     const modalInstance = bootstrap.Modal.getInstance(modalEl);
     if (modalInstance) modalInstance.hide();
@@ -341,10 +385,64 @@ async function agendarCita() {
 
 async function eliminarCita() {
     const id = document.getElementById('modalCita').getAttribute('data-edit-id');
-    if (id && confirm("¿Estás segura de eliminar esta cita?")) {
-        await db.agenda.delete(parseInt(id));
-        calendar.refetchEvents();
-        bootstrap.Modal.getInstance(document.getElementById('modalCita')).hide();
+    if (!id) return;
+
+    if (confirm("¿Estás segura de eliminar esta cita?")) {
+        try {
+            // 1. OBTENEMOS LOS DATOS (Rápido)
+            const cita = await db.agenda.get(parseInt(id));
+            
+            // 2. ACCIÓN INMEDIATA (Lo que ve el usuario)
+            // Borramos de la base de datos local y refrescamos la interfaz ya mismo
+            await db.agenda.delete(parseInt(id));
+            calendar.refetchEvents();
+            
+            // Cerramos el modal sin esperar a Google
+            const modalInstance = bootstrap.Modal.getInstance(document.getElementById('modalCita'));
+            if (modalInstance) modalInstance.hide();
+
+            console.log("Cita eliminada visualmente. Procesando en Google en segundo plano...");
+
+            // 3. PROCESO EN SEGUNDO PLANO (Google)
+            // Si tiene ID de Google, lo borramos, pero el usuario ya no tiene que esperar
+            if (cita && cita.googleEventId) {
+                // Si no hay token, lo pedimos (esto puede abrir el popup si es necesario)
+                if (!gapi.client.getToken() && tokenClient) {
+                    tokenClient.requestAccessToken({ prompt: '' });
+                    // Esperamos un poco solo para que el proceso de Google tenga tiempo de arrancar
+                    await new Promise(r => setTimeout(r, 500));
+                }
+
+                // Llamamos a borrar pero ya no usamos 'await' de forma que bloquee la interfaz
+                eliminarEventoGoogle(cita.googleEventId).then(() => {
+                    console.log("✅ Borrado en Google completado");
+                }).catch(err => {
+                    console.error("❌ Falló el borrado en Google, pero ya se quitó de la app:", err);
+                });
+            }
+
+        } catch (error) {
+            console.error("Error al eliminar:", error);
+            // Si algo falla, intentamos asegurar que al menos se cierre el modal
+            const modalInstance = bootstrap.Modal.getInstance(document.getElementById('modalCita'));
+            if (modalInstance) modalInstance.hide();
+        }
+    }
+}
+
+// NO OLVIDES añadir esta función de apoyo si no la pusiste antes:
+async function eliminarEventoGoogle(googleEventId) {
+    if (!gapi.client.calendar || !googleEventId) return;
+    try {
+        await gapi.client.calendar.events.delete({
+            'calendarId': 'primary',
+            'eventId': googleEventId
+        });
+        console.log('🗑️ Evento eliminado de Google con éxito');
+    } catch (err) {
+        // Si el evento ya fue borrado manualmente en el móvil, Google dará error 404, 
+        // lo ignoramos porque el objetivo es que ya no esté.
+        console.warn('Aviso: No se pudo borrar en Google (quizás ya no existía)', err);
     }
 }
 
@@ -1442,4 +1540,131 @@ function renderizarGraficos(ventas) {
             }
         }
     });
+}
+
+
+//Lógica para el calendario de Gmail
+async function crearEventoGoogle(cita) {
+    if (!gapi.client.calendar) {
+        console.error("Google Calendar no está listo");
+        return;
+    }
+
+    try {
+        // Aseguramos que las fechas sean objetos Date antes de convertirlas a ISO
+        const inicioISO = new Date(cita.fechaInicio).toISOString();
+        const finISO = new Date(cita.fechaFin).toISOString();
+
+        const evento = {
+            'summary': `💅 ${cita.nombreClienta}`,
+            'description': `Servicio: ${cita.servicio}`,
+            'start': {
+                'dateTime': inicioISO,
+                'timeZone': 'Europe/Madrid'
+            },
+            'end': {
+                'dateTime': finISO,
+                'timeZone': 'Europe/Madrid'
+            }
+        };
+
+        const response = await gapi.client.calendar.events.insert({
+            'calendarId': 'primary',
+            'resource': evento,
+        });
+
+        console.log('✅ Evento creado en Google Calendar: ' + response.result.htmlLink);
+        return response.result.id; 
+    } catch (err) {
+        console.error('❌ Error creando evento en Google:', err);
+        // Si el error es 401, es que el token ha caducado y hay que volver a conectar
+        if (err.status === 401) {
+            alert("La sesión de Google ha caducado. Por favor, pulsa 'Conectar Calendario' de nuevo.");
+        }
+    }
+}
+
+
+// 2. Esta función configura todo lo de Google
+function inicializarGoogle() {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: '674688988885-fmjjdoe5svfabqj1t619c940enn6gc3d.apps.googleusercontent.com',
+        scope: 'https://www.googleapis.com/auth/calendar.events',
+        callback: (tokenResponse) => {
+            if (tokenResponse && tokenResponse.access_token) {
+                console.log("✅ Acceso concedido a Google Calendar");
+                actualizarBotonGoogle(true);
+            }
+        },
+    });
+    gsiInited = true;
+
+    // Intento automático al cargar
+    setTimeout(() => {
+        try {
+            // Si el navegador tiene la sesión abierta, esto lo conectará en silencio
+            tokenClient.requestAccessToken({ prompt: '' }); 
+        } catch (e) {
+            console.log("Sesión no recuperada automáticamente.");
+        }
+    }, 1500); 
+}
+
+// Función auxiliar para no repetir código del botón
+function actualizarBotonGoogle(conectado) {
+    const btn = document.getElementById('btnConectarGoogle');
+    if (btn) {
+        if (conectado) {
+            btn.innerText = "✅ Calendario Conectado";
+            btn.style.backgroundColor = "#4CAF50";
+        } else {
+            btn.innerText = "Conectar Calendario";
+            btn.style.backgroundColor = ""; // Color original
+        }
+    }
+}
+
+// 3. Esta función lanza la ventana al pulsar el botón
+function manejarAuthClick() {
+    if (tokenClient) {
+        // Si el navegador bloquea el popup, esto pedirá permiso
+        tokenClient.requestAccessToken({ prompt: 'consent' });
+    } else {
+        console.error("Error: El cliente de Google no se ha cargado.");
+        alert("La librería de Google aún se está cargando, espera un segundo.");
+    }
+}
+
+// 4. Cargamos las librerías al abrir la web
+window.addEventListener('load', () => {
+    // Cargamos GSI (Identity)
+    if (typeof google !== 'undefined') {
+        inicializarGoogle();
+    }
+    
+    // Cargamos GAPI (Calendar API)
+    gapi.load('client', async () => {
+        await gapi.client.init({
+            discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'],
+        });
+        gapiInited = true;
+        console.log("🚀 Google Calendar API lista");
+    });
+});
+
+// 5. Vincular el botón
+document.getElementById('btnConectarGoogle').onclick = manejarAuthClick;
+
+async function eliminarEventoGoogle(googleEventId) {
+    if (!gapi.client.calendar || !googleEventId) return;
+
+    try {
+        await gapi.client.calendar.events.delete({
+            'calendarId': 'primary',
+            'eventId': googleEventId
+        });
+        console.log('🗑️ Evento eliminado de Google Calendar');
+    } catch (err) {
+        console.error('❌ Error al eliminar en Google:', err);
+    }
 }
