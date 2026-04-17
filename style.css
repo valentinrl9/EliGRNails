@@ -308,11 +308,19 @@ body {
     text-decoration: line-through; /* Opcional: si quieres tachar el texto */
 }
 
-/* Para que el icono ✅ se vea bien */
+/* Ajuste del texto dentro de las citas del calendario */
 .fc-event-title {
-    display: flex;
-    align-items: center;
-    gap: 5px;
+    font-size: 0.85rem !important; /* Texto un pelín más pequeño */
+    font-weight: 400 !important;   /* Quita la negrita (400 es el peso normal) */
+    letter-spacing: 0.3px;         /* Un poco de aire entre letras para legibilidad */
+    padding: 1px 4px !important;
+}
+
+/* Opcional: Si quieres que la hora también se vea más fina */
+.fc-event-time {
+    font-size: 0.75rem !important;
+    font-weight: 300 !important;
+    margin-right: 3px;
 }
 
 .card-servicio-lujo {
