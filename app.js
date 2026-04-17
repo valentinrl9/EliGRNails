@@ -212,7 +212,7 @@ function initCalendar() {
 
                     return {
                         id: c.id,
-                        title: `${icono}${cli.nombre} - ${ser.nombre}`,
+                        title: `${icono}${cli.nombre}`,
                         start: c.fecha,
                         backgroundColor: colorFondo,
                         borderColor: isCobrado ? '#222' : '#c5a059',
