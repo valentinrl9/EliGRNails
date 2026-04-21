@@ -26,6 +26,12 @@ db.version(3).stores({
     });
 });
 
+function escaparHTML(str) {
+    if (!str) return "";
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return str.replace(/[&<>"']/g, m => map[m]);
+}
+
 // Función para comprobar si hoy es el cumpleaños de alguna clienta
 async function checkCumpleaños() {
     try {
@@ -163,7 +169,7 @@ function initCalendar() {
             document.getElementById('selSer').value = ""; // Limpia el servicio
             // ----------------------------------------------------------------
 
-            document.getElementById('modalCitaTitulo').innerText = "Nueva Cita";
+            document.getElementById('modalCitaTitulo').textContent = "Nueva Cita";
             document.getElementById('btnEliminarCita').style.display = 'none';
             document.getElementById('btnCobrarCita').style.display = 'none';
             
@@ -259,7 +265,7 @@ async function prepararEdicionCita(id) {
     if(btnCobrar) btnCobrar.style.display = 'none';
     if(btnDesbloquear) btnDesbloquear.style.display = 'none';
     
-    document.getElementById('modalCitaTitulo').innerText = "Nueva Cita";
+    document.getElementById('modalCitaTitulo').textContent = "Nueva Cita";
 
     // =========================================================
     // 2. CARGAR LISTAS (Actualizar Selectores)
@@ -268,11 +274,11 @@ async function prepararEdicionCita(id) {
     clientas.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", 'es', { sensitivity: 'base' }));
     
     document.getElementById('selCli').innerHTML = '<option value="">--- Selecciona Clienta ---</option>' + 
-        clientas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+        clientas.map(c => `<option value="${c.id}">${escaparHTML(c.nombre)}</option>`).join('');
 
     const servicios = await db.servicios.toArray();
     document.getElementById('selSer').innerHTML = '<option value="">--- Selecciona Servicio ---</option>' + 
-        servicios.map(s => `<option value="${s.id}">${s.nombre}</option>`).join('');
+        servicios.map(s => `<option value="${s.id}">${escaparHTML(s.nombre)}</option>`).join('');
 
     // =========================================================
     // 3. SI ES EDICIÓN: RELLENAR Y BLOQUEAR SEGÚN CORRESPONDA
@@ -284,14 +290,14 @@ async function prepararEdicionCita(id) {
         modalEl.setAttribute('data-edit-id', id); // Aquí sí ponemos el ID
         
         if (cita.cobrado) {
-            document.getElementById('modalCitaTitulo').innerText = "Cita Finalizada (Bloqueada)";
+            document.getElementById('modalCitaTitulo').textContent = `Cita Finalizada - ${escaparHTML(cita.nombreClienta)}`;
             modalEl.querySelectorAll('input, select').forEach(i => i.disabled = true);
             if(btnGuardar) btnGuardar.style.display = 'none';
             if(btnEliminar) btnEliminar.style.display = 'none';
             if(btnCobrar) btnCobrar.style.display = 'none';
             if(btnDesbloquear) btnDesbloquear.style.display = 'block';
         } else {
-            document.getElementById('modalCitaTitulo').innerText = "Gestionar Cita";
+            document.getElementById('modalCitaTitulo').textContent = "Gestionar Cita";
             if(btnEliminar) btnEliminar.style.display = 'block';
             if(btnCobrar) btnCobrar.style.display = 'block';
         }
@@ -942,18 +948,18 @@ async function listarClientas() {
                     <div style="display: flex; width: 100%; align-items: center; gap: 15px;">
                         <div style="flex: 2.5; min-width: 160px;">
                             <span style="font-size: 1.15rem !important; font-weight: 700 !important; color: #fcf6ba !important; white-space: nowrap; letter-spacing: 0.3px;">
-                                ${c.nombre}
+                                ${escaparHTML(c.nombre)}
                             </span>
                         </div>
 
                         <div style="flex: 0.8; color: #eec9c3; font-size: 0.75rem; white-space: nowrap; min-width: 70px;">
                             ${c.fechaNacimiento ? `
-                                <i class="fa-solid fa-cake-candles" style="font-size: 0.65rem; margin-right: 5px;"></i>${c.fechaNacimiento}
+                                <i class="fa-solid fa-cake-candles" style="font-size: 0.65rem; margin-right: 5px;"></i>${escaparHTML(c.fechaNacimiento)}
                             ` : ''}
                         </div>
 
                         <div style="flex: 1; color: #888; font-size: 0.75rem; white-space: nowrap;">
-                            <i class="fa-solid fa-phone" style="font-size: 0.65rem; margin-right: 5px; color: #c5a059;"></i>${c.telefono || ''}
+                            <i class="fa-solid fa-phone" style="font-size: 0.65rem; margin-right: 5px; color: #c5a059;"></i>${escaparHTML(c.telefono || '')}
                         </div>
 
                         <div style="width: 55px; text-align: center; border-left: 1px solid #333; border-right: 1px solid #333;">
@@ -1099,7 +1105,7 @@ async function listarServicios() {
             <div class="list-group-item card-servicio-lujo" 
                  onclick="prepararEdicionServicio(${s.id})" 
                  style="cursor: pointer;">
-                <h6 class="fw-bold">${s.nombre}</h6>
+                <h6 class="fw-bold">${escaparHTML(s.nombre)}</h6>
                 <div class="text-gold h4">${s.coste}€</div>
             </div>
         </div>
@@ -1154,13 +1160,13 @@ async function actualizarSelectores() {
     if(selCli) {
         // Añadimos la opción vacía al principio para que no salga ninguna clienta por defecto
         selCli.innerHTML = '<option value="" disabled selected>--- Selecciona Clienta ---</option>' + 
-            clis.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+            clis.map(c => `<option value="${c.id}">${escaparHTML(c.nombre)}</option>`).join('');
     }
 
     if(selSer) {
         // Añadimos la opción vacía al principio para los servicios
         selSer.innerHTML = '<option value="" disabled selected>--- Selecciona Servicio ---</option>' + 
-            sers.map(s => `<option value="${s.id}">${s.nombre} (${s.coste}€)</option>`).join('');
+            sers.map(s => `<option value="${s.id}">${escaparHTML(s.nombre)} (${s.coste}€)</option>`).join('');
     }
 }
 
@@ -1311,7 +1317,7 @@ async function actualizarSugerenciasLocalidad() {
 
     // 4. Limpiamos y rellenamos el datalist
     datalist.innerHTML = localidadesUnicas
-        .map(loc => `<option value="${loc}">`)
+        .map(loc => `<option value="${escaparHTML(loc)}">`)
         .join('');
 }
 
@@ -1323,7 +1329,7 @@ function mostrarAlertaCumple(cumpleañeras) {
     const contenedorBotones = document.getElementById('contenedorBotonesCumple');
     
     listaTexto.innerHTML = cumpleañeras.length === 1 
-        ? `Hoy es el cumple de <strong class="text-gold">${cumpleañeras[0].nombre}</strong>.`
+        ? `Hoy es el cumple de <strong class="text-gold">${escaparHTML(cumpleañeras[0].nombre)}</strong>.`
         : `Hoy hay <strong>${cumpleañeras.length}</strong> clientas de cumpleaños:`;
 
     contenedorBotones.innerHTML = ''; 
@@ -1336,7 +1342,7 @@ function mostrarAlertaCumple(cumpleañeras) {
         // 1. Creamos la estructura visual
         divFila.innerHTML = `
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <span class="fw-bold">${c.nombre}</span>
+                <span class="fw-bold">${escaparHTML(c.nombre)}</span>
                 <span class="badge bg-gold text-dark">🎂 Regalo</span>
             </div>
             <div class="d-grid gap-2" id="wrapper-btn-${c.id}"></div>
