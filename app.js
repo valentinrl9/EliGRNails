@@ -38,6 +38,7 @@ async function checkCumpleaños() {
         const hoy = new Date();
         const diaHoy = hoy.getDate();
         const mesHoy = hoy.getMonth() + 1;
+        const añoActual = hoy.getFullYear(); // <-- 1. Necesitamos el año actual
 
         const todas = await db.clientas.toArray();
         
@@ -46,20 +47,22 @@ async function checkCumpleaños() {
 
             let diaNac, mesNac;
 
-            // CASO 1: Formato "día/mes" (ej: "3/1" o "03/01")
             if (c.fechaNacimiento.includes('/')) {
                 const partes = c.fechaNacimiento.split('/');
                 diaNac = parseInt(partes[0]);
                 mesNac = parseInt(partes[1]);
             } 
-            // CASO 2: Formato estándar "YYYY-MM-DD" (el de los calendarios)
             else if (c.fechaNacimiento.includes('-')) {
                 const f = new Date(c.fechaNacimiento);
                 diaNac = f.getDate();
                 mesNac = f.getMonth() + 1;
             }
 
-            return diaNac === diaHoy && mesNac === mesHoy;
+            // 2. MODIFICAMOS EL RETURN:
+            // Es su cumple SI coincide el día/mes Y NO ha sido felicitada este año
+            return diaNac === diaHoy && 
+                   mesNac === mesHoy && 
+                   c.ultimoCumpleFelicitado !== añoActual; 
         });
 
         if (cumpleañeras.length > 0) {
@@ -1335,45 +1338,44 @@ function mostrarAlertaCumple(cumpleañeras) {
     contenedorBotones.innerHTML = ''; 
 
     cumpleañeras.forEach(c => {
-    // --- CAMBIO 1: Lógica de control ---
-    const añoActual = new Date().getFullYear();
-    const yaFelicitada = c.ultimoCumpleFelicitado === añoActual;
+        const añoActual = new Date().getFullYear();
+        const yaFelicitada = c.ultimoCumpleFelicitado === añoActual;
+        
+        const divFila = document.createElement('div');
+        divFila.className = 'mb-4 p-3 border border-gold rounded bg-black text-white'; 
+        divFila.id = 'fila-cumple-' + c.id;
+        if (yaFelicitada) divFila.style.opacity = '0.4';
+        
+        divFila.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <span class="fw-bold">${escaparHTML(c.nombre)}</span>
+                <span class="badge bg-gold text-dark">🎂 Regalo</span>
+            </div>
+            <div class="d-grid gap-2" id="wrapper-btn-${c.id}"></div>
+        `;
+        contenedorBotones.appendChild(divFila);
 
-    const divFila = document.createElement('div');
-    divFila.className = 'mb-4 p-3 border border-gold rounded bg-black text-white'; 
-    divFila.id = 'fila-cumple-' + c.id;
-    
-    // --- CAMBIO 2: Aplicar opacidad si ya está lista ---
-    if (yaFelicitada) divFila.style.opacity = '0.4';
+        const btn = document.createElement('button');
+        btn.id = 'btn-cumple-' + c.id;
+        
+        if (yaFelicitada) {
+            btn.className = 'btn btn-secondary w-100 mt-2';
+            btn.innerHTML = '✅ Completado';
+            btn.disabled = true;
+        } else {
+            btn.className = 'btn btn-success w-100';
+            btn.innerHTML = '<i class="bi bi-whatsapp"></i> 1. Enviar a Clienta';
+            btn.setAttribute('data-paso', '1');
+            btn.onclick = function() {
+                enviarWhatsAppCumple(c.telefono, c.nombre, c.id);
+            };
+        }
 
-    divFila.innerHTML = `
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <span class="fw-bold">${escaparHTML(c.nombre)}</span>
-            <span class="badge bg-gold text-dark">🎂 Regalo</span>
-        </div>
-        <div class="d-grid gap-2" id="wrapper-btn-${c.id}"></div>
-    `;
-    contenedorBotones.appendChild(divFila);
+        document.getElementById('wrapper-btn-' + c.id).appendChild(btn);
+    });
 
-    const btn = document.createElement('button');
-    btn.id = 'btn-cumple-' + c.id;
-    
-    // --- CAMBIO 3: Estado inicial del botón ---
-    if (yaFelicitada) {
-        btn.className = 'btn btn-secondary w-100';
-        btn.innerHTML = '✅ Completado';
-        btn.disabled = true;
-    } else {
-        btn.className = 'btn btn-success w-100';
-        btn.innerHTML = '<i class="bi bi-whatsapp"></i> 1. Enviar a Clienta';
-        btn.setAttribute('data-paso', '1');
-        btn.onclick = function() {
-            enviarWhatsAppCumple(c.telefono, c.nombre, c.id);
-        };
-    }
-
-    document.getElementById('wrapper-btn-' + c.id).appendChild(btn);
-});
+    modal.show();
+}
 
 function enviarWhatsAppCumple(telefono, nombre, id) {
     const miTelefono = "615821328"; 
@@ -1381,9 +1383,10 @@ function enviarWhatsAppCumple(telefono, nombre, id) {
     const paso = boton.getAttribute('data-paso');
 
     if (paso === '2') {
-        // PASO 2: REGISTRO PARA TI
         const mensajeParaMi = "✅ Registro: Regalo enviado a *" + nombre + "*";
         window.open("https://wa.me/34" + miTelefono + "?text=" + encodeURIComponent(mensajeParaMi), '_blank');
+        
+        // Guardamos el año en la base de datos
         db.clientas.update(id, { ultimoCumpleFelicitado: new Date().getFullYear() });
 
         boton.innerHTML = "✅ Completado";
@@ -1391,11 +1394,9 @@ function enviarWhatsAppCumple(telefono, nombre, id) {
         boton.disabled = true;
         document.getElementById('fila-cumple-' + id).style.opacity = '0.4';
     } else {
-        // PASO 1: MENSAJE CLIENTA
         const mensajeClienta = "¡Hola " + nombre + "! 🎂 Desde Eli·GR Nails te deseamos un muy feliz cumpleaños. ✨ Tenemos un regalito especial para ti en el salón, ¡pásate a vernos cuando quieras!";
         window.open("https://wa.me/34" + telefono + "?text=" + encodeURIComponent(mensajeClienta), '_blank');
 
-        // Transformamos el botón
         boton.innerHTML = "2. Registrar en MI WhatsApp";
         boton.className = "btn btn-info w-100 text-white mt-2"; 
         boton.setAttribute('data-paso', '2');
