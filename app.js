@@ -1335,40 +1335,48 @@ function mostrarAlertaCumple(cumpleañeras) {
     contenedorBotones.innerHTML = ''; 
 
     cumpleañeras.forEach(c => {
-        const divFila = document.createElement('div');
-        divFila.className = 'mb-4 p-3 border border-gold rounded bg-black text-white'; 
-        divFila.id = 'fila-cumple-' + c.id;
-        
-        // 1. Creamos la estructura visual
-        divFila.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <span class="fw-bold">${escaparHTML(c.nombre)}</span>
-                <span class="badge bg-gold text-dark">🎂 Regalo</span>
-            </div>
-            <div class="d-grid gap-2" id="wrapper-btn-${c.id}"></div>
-        `;
-        contenedorBotones.appendChild(divFila);
+    // --- CAMBIO 1: Lógica de control ---
+    const añoActual = new Date().getFullYear();
+    const yaFelicitada = c.ultimoCumpleFelicitado === añoActual;
 
-        // 2. Creamos el botón manualmente para que no falle por comillas
-        const btn = document.createElement('button');
-        btn.id = 'btn-cumple-' + c.id;
+    const divFila = document.createElement('div');
+    divFila.className = 'mb-4 p-3 border border-gold rounded bg-black text-white'; 
+    divFila.id = 'fila-cumple-' + c.id;
+    
+    // --- CAMBIO 2: Aplicar opacidad si ya está lista ---
+    if (yaFelicitada) divFila.style.opacity = '0.4';
+
+    divFila.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <span class="fw-bold">${escaparHTML(c.nombre)}</span>
+            <span class="badge bg-gold text-dark">🎂 Regalo</span>
+        </div>
+        <div class="d-grid gap-2" id="wrapper-btn-${c.id}"></div>
+    `;
+    contenedorBotones.appendChild(divFila);
+
+    const btn = document.createElement('button');
+    btn.id = 'btn-cumple-' + c.id;
+    
+    // --- CAMBIO 3: Estado inicial del botón ---
+    if (yaFelicitada) {
+        btn.className = 'btn btn-secondary w-100';
+        btn.innerHTML = '✅ Completado';
+        btn.disabled = true;
+    } else {
         btn.className = 'btn btn-success w-100';
         btn.innerHTML = '<i class="bi bi-whatsapp"></i> 1. Enviar a Clienta';
         btn.setAttribute('data-paso', '1');
-        
-        // 3. Asignamos la función directamente (SIN COMILLAS en el HTML)
         btn.onclick = function() {
             enviarWhatsAppCumple(c.telefono, c.nombre, c.id);
         };
+    }
 
-        document.getElementById('wrapper-btn-' + c.id).appendChild(btn);
-    });
-
-    modal.show();
-}
+    document.getElementById('wrapper-btn-' + c.id).appendChild(btn);
+});
 
 function enviarWhatsAppCumple(telefono, nombre, id) {
-    const miTelefono = "622121155"; 
+    const miTelefono = "615821328"; 
     const boton = document.getElementById('btn-cumple-' + id);
     const paso = boton.getAttribute('data-paso');
 
@@ -1376,7 +1384,8 @@ function enviarWhatsAppCumple(telefono, nombre, id) {
         // PASO 2: REGISTRO PARA TI
         const mensajeParaMi = "✅ Registro: Regalo enviado a *" + nombre + "*";
         window.open("https://wa.me/34" + miTelefono + "?text=" + encodeURIComponent(mensajeParaMi), '_blank');
-        
+        db.clientas.update(id, { ultimoCumpleFelicitado: new Date().getFullYear() });
+
         boton.innerHTML = "✅ Completado";
         boton.className = "btn btn-secondary w-100 mt-2";
         boton.disabled = true;
