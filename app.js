@@ -366,21 +366,28 @@ async function agendarCita() {
     // --- INTEGRACIÓN CON GOOGLE CALENDAR MEJORADA ---
     if (typeof gapi !== 'undefined') {
         try {
-            // Si no hay token, intentamos pedirlo silenciosamente
             if (gapi.client.getToken() === null && tokenClient) {
                 console.log("Sesión no detectada, intentando auto-conexión...");
                 tokenClient.requestAccessToken({ prompt: '' });
-                // Esperamos un segundo para que Google responda
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
 
-            // Si ahora sí tenemos acceso, creamos el evento
             if (gapi.client.calendar && gapi.client.getToken() !== null) {
-                const googleId = await crearEventoGoogle(datosCita);
-                if (googleId) {
-                    await db.agenda.update(idFinal, { googleEventId: googleId });
-                    console.log("✅ Sincronizado con Google Calendar correctamente");
+                // --- CAMBIO ESENCIAL AQUÍ ---
+                const citaActualizada = await db.agenda.get(idFinal);
+
+                if (editId && citaActualizada.googleEventId) {
+                    // Si es edición y ya existe en Google, actualizamos
+                    await actualizarEventoGoogle(citaActualizada.googleEventId, datosCita);
+                } else {
+                    // Si es nueva o no tenía ID previo, creamos
+                    const googleId = await crearEventoGoogle(datosCita);
+                    if (googleId) {
+                        await db.agenda.update(idFinal, { googleEventId: googleId });
+                        console.log("✅ Cita creada y sincronizada en Google");
+                    }
                 }
+                // -----------------------------
             }
         } catch (error) {
             console.error("Error al sincronizar con Google:", error);
@@ -1714,5 +1721,23 @@ async function eliminarEventoGoogle(googleEventId) {
         } else {
             console.error('❌ Error al eliminar en Google:', err);
         }
+    }
+}
+
+async function actualizarEventoGoogle(googleEventId, datos) {
+    if (!gapi.client.calendar || !googleEventId) return;
+    try {
+        await gapi.client.calendar.events.patch({
+            'calendarId': 'primary',
+            'eventId': googleEventId,
+            'resource': {
+                'summary': `${datos.nombreClienta} - ${datos.servicio}`,
+                'start': { 'dateTime': new Date(datos.fechaInicio).toISOString() },
+                'end': { 'dateTime': datos.fechaFin }
+            }
+        });
+        console.log('✅ Evento actualizado en Google con éxito');
+    } catch (err) {
+        console.error('❌ Error al actualizar en Google:', err);
     }
 }
