@@ -1433,28 +1433,53 @@ function renderizarGraficos(ventas) {
     }
 
     const semanaActual = getWeekNumber(ahora);
+    
+    // --- 1. INICIALIZAR ARRAYS ---
     const ingresosSemanales = Array(semanaActual).fill(0);
+    const cantidadServiciosSemanales = Array(semanaActual).fill(0);
     const etiquetasSemanas = Array.from({length: semanaActual}, (_, i) => `S${i + 1}`);
 
-    // --- 2. LÓGICA MENSUAL (Ya la tienes bien) ---
     const mesesNombres = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
     const ingresosMensuales = Array(12).fill(0);
+    const cantidadServiciosMensuales = Array(12).fill(0); // <-- Añadido para la mensual
 
-    // --- 3. PROCESAR DATOS ---
+    // --- 2. PROCESAR DATOS ---
     ventas.forEach(v => {
         const fVenta = new Date(v.fecha);
         
         if (fVenta.getFullYear() === añoActual) {
-            // Sumar para meses (esto estaba bien)
-            ingresosMensuales[fVenta.getMonth()] += v.importe;
+            // Lógica Mensual
+            const mesIdx = fVenta.getMonth();
+            ingresosMensuales[mesIdx] += v.importe;
+            cantidadServiciosMensuales[mesIdx] += 1; // Contamos servicios por mes
 
-            // NUEVA LÓGICA PARA SEMANAS:
+            // Lógica Semanal
             const numSemana = getWeekNumber(fVenta);
-            
-            // Si la semana de la venta es del año actual y no es futura
             if (numSemana >= 1 && numSemana <= semanaActual) {
                 ingresosSemanales[numSemana - 1] += v.importe;
+                cantidadServiciosSemanales[numSemana - 1] += 1; // Contamos servicios por semana
             }
+        }
+    });
+
+    // --- 3. CONFIGURACIÓN COMÚN DE DATASETS DE SERVICIOS ---
+    const datasetServicios = (datos, ejeId) => ({
+        label: 'Servicios',
+        data: datos,
+        type: 'line',
+        yAxisID: ejeId,
+        borderColor: '#ffffff',
+        borderWidth: 2,
+        borderDash: [5, 5],
+        pointRadius: 3,
+        tension: 0.3,
+        fill: false,
+        datalabels: {
+            align: 'bottom',
+            anchor: 'start',
+            formatter: (v) => v > 0 ? v : '',
+            color: '#c5a059',
+            font: { size: 10, weight: 'bold' }
         }
     });
 
@@ -1464,107 +1489,71 @@ function renderizarGraficos(ventas) {
         type: 'line',
         data: {
             labels: etiquetasSemanas, 
-            datasets: [{
-                data: ingresosSemanales,
-                borderColor: '#eec9c3', // Rosa Nude
-                backgroundColor: 'rgba(236, 95, 156, 0.5)',
-                borderWidth: 2,
-                pointBackgroundColor: '#c5a059', // Dorado Eli-GR
-                pointRadius: 4,
-                tension: 0,
-                fill: true,
-                datalabels: {
-                    align: 'top',
-                    anchor: 'end',
-                    formatter: (v) => v > 0 ? v + '€' : '',
-                    color: '#ffffff', // Blanco
-                    font: { size: 10}
-                }
-            }]
+            datasets: [
+                {
+                    label: 'Ingresos (€)',
+                    data: ingresosSemanales,
+                    yAxisID: 'y',
+                    borderColor: '#eec9c3',
+                    backgroundColor: 'rgba(236, 95, 156, 0.5)',
+                    borderWidth: 2,
+                    fill: true,
+                    datalabels: { align: 'top', anchor: 'end', formatter: (v) => v > 0 ? v + '€' : '', color: '#ffffff' }
+                },
+                datasetServicios(cantidadServiciosSemanales, 'y1')
+            ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            backgroundColor: 'transparent',
-            layout: { padding: { top: 25, left: 10, right: 10, bottom: 10 } },
-            plugins: { 
-                legend: { display: false },
-                datalabels: {
-                    align: 'top',
-                    anchor: 'end',
-                    color: '#ffffff',
-                    font: { size: 10},
-                    formatter: (v) => v > 0 ? v + '€' : ''
-                }
-            },
+            layout: { padding: { top: 35, left: 10, right: 30, bottom: 10 } },
+            plugins: { legend: { display: false }, datalabels: { display: true } },
             scales: {
-                y: { 
-                    beginAtZero: true, 
-                    grid: { color: '#222' }, 
-                    ticks: { color: '#ffffff', font: { size: 10 } } 
-                },
-                x: { 
-                    grid: { display: false }, 
-                    ticks: { color: '#ffffff', font: { size: 10 } } 
-                }
+                y: { beginAtZero: true, grid: { color: '#222' }, ticks: { color: '#ffffff' } },
+                y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, ticks: { color: '#c5a059', stepSize: 1 } },
+                x: { grid: { display: false }, ticks: { color: '#ffffff' } }
             }
         }
     });
 
-    // --- 5. DIBUJAR GRÁFICO MENSUAL ---
+    // --- 5. DIBUJAR GRÁFICO MENSUAL (Ahora también con Doble Eje) ---
     if (chartMes) chartMes.destroy();
     chartMes = new Chart(canvasMes.getContext('2d'), {
         type: 'line',
         data: {
             labels: mesesNombres,
-            datasets: [{
-                data: ingresosMensuales,
-                borderColor: '#eec9c3', // Rosa Nude
-                backgroundColor: 'rgba(236, 95, 156, 0.5)',
-                borderWidth: 2,
-                pointBackgroundColor: '#c5a059', // Dorado Eli-GR
-                pointRadius: 4,
-                tension: 0,
-                fill: true,
-                datalabels: {
-                    align: 'top',
-                    anchor: 'end',
-                    formatter: (v) => v > 0 ? v + '€' : '',
-                    color: '#ffffff',
-                    font: { size: 11}
-                }
-            }]
+            datasets: [
+                {
+                    label: 'Ingresos (€)',
+                    data: ingresosMensuales,
+                    yAxisID: 'y',
+                    borderColor: '#eec9c3',
+                    backgroundColor: 'rgba(236, 95, 156, 0.5)',
+                    borderWidth: 2,
+                    fill: true,
+                    datalabels: { align: 'top', anchor: 'end', formatter: (v) => v > 0 ? v + '€' : '', color: '#ffffff' }
+                },
+                datasetServicios(cantidadServiciosMensuales, 'y1') // <-- SEGUNDA LÍNEA AÑADIDA
+            ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            layout: { padding: { top: 25, left: 10, right: 10, bottom: 10 } },
-            backgroundColor: 'transparent',
-            plugins: { 
-                legend: { display: false },
-                datalabels: {
-                    align: 'top',
-                    anchor: 'end',
-                    color: '#ffffff',
-                    font: { size: 11},
-                    formatter: (v) => v > 0 ? v + '€' : ''
-                }
-            },
+            layout: { padding: { top: 35, left: 10, right: 30, bottom: 10 } }, // Padding ajustado para el eje derecho
+            plugins: { legend: { display: false }, datalabels: { display: true } },
             scales: {
-                y: { 
+                y: { beginAtZero: true, grid: { color: '#222' }, ticks: { color: '#ffffff' } },
+                y1: { 
+                    position: 'right', 
                     beginAtZero: true, 
-                    grid: { color: '#222' }, 
-                    ticks: { color: '#ffffff', font: { size: 10 } } 
+                    grid: { drawOnChartArea: false }, 
+                    ticks: { color: '#c5a059', stepSize: 1 } // Eje para servicios mensuales
                 },
-                x: { 
-                    grid: { display: false }, 
-                    ticks: { color: '#ffffff', font: { size: 10 } } 
-                }
+                x: { grid: { display: false }, ticks: { color: '#ffffff' } }
             }
         }
     });
 }
-
 
 //Lógica para el calendario de Gmail
 async function crearEventoGoogle(cita) {
