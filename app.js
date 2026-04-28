@@ -26,6 +26,28 @@ db.version(3).stores({
     });
 });
 
+// --- 🎨 CONFIGURACIÓN DE COLORES SWEETALERT2 PARA ELI-GR NAILS ---
+const swalConfig = {
+    background: '#1a1a1a', 
+    color: '#d39e00', 
+    confirmButtonColor: '#c48b00', 
+    cancelButtonColor: '#444',
+    customClass: {
+        confirmButton: 'swal-gold-button'
+    }
+};
+
+// Opcional: Añadir un pequeño estilo CSS al vuelo para el botón dorado
+const style = document.createElement('style');
+style.innerHTML = `
+  .swal2-styled.swal-gold-button {
+    color: #fff !important; /* Texto blanco en el botón dorado para contraste */
+    border: 1px solid #c48b00;
+  }
+`;
+document.head.appendChild(style);
+// ------------------------------------------------------------------
+
 function escaparHTML(str) {
     if (!str) return "";
     const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
@@ -340,7 +362,13 @@ async function agendarCita() {
 
     // 1. Validación de campos vacíos
     if (!clienteId || !servicioId || !fecha) {
-        alert("Por favor, selecciona clienta, servicio y fecha.");
+        Swal.fire({
+                    ...swalConfig,
+                    icon: 'info',
+                    title: 'Campos incompletos',
+                    text: 'Por favor, selecciona clienta, servicio y fecha para agendar la cita.',
+                    confirmButtonText: 'Entendido'
+                }); 
         return;
     }
 
@@ -351,14 +379,26 @@ async function agendarCita() {
     ]);
 
     if (!cliente || !servicio) {
-        alert("Error: La clienta o el servicio seleccionados ya no existen.");
+        Swal.fire({
+                    ...swalConfig,
+                    icon: 'error',
+                    title: '¡Vaya!',
+                    text: 'La clienta o el servicio seleccionados ya no existen en el sistema.',
+                    confirmButtonText: 'Cerrar'
+                });
         return;
     }
 
     if (editId) {
         const citaExistente = await db.agenda.get(parseInt(editId));
         if (citaExistente && citaExistente.cobrado) {
-            alert("⚠️ No puedes modificar una cita que ya ha sido cobrada.");
+            Swal.fire({
+                            ...swalConfig,
+                            icon: 'warning',
+                            title: 'Cita Bloqueada',
+                            text: 'Esta cita ya ha sido cobrada y no se puede modificar por seguridad contable.',
+                            confirmButtonText: 'Entendido'
+                        });
             return;
         }
     }
@@ -414,7 +454,6 @@ async function agendarCita() {
                 }
             } catch (errorGoogle) {
                 console.error("Error al sincronizar con Google:", errorGoogle);
-                // No lanzamos alert aquí para que la cita se guarde en local aunque Google falle
             }
         }
 
@@ -426,7 +465,13 @@ async function agendarCita() {
 
     } catch (error) {
         console.error("Error al agendar la cita:", error);
-        alert("Hubo un fallo al guardar la cita en la base de datos.");
+            Swal.fire({
+                        ...swalConfig,
+                        icon: 'error',
+                        title: 'Error de Sistema',
+                        text: 'Hubo un fallo técnico al intentar guardar la cita. Por favor, inténtalo de nuevo o reinicia la App.',
+                        confirmButtonText: 'Cerrar'
+                    });
     }
 }
 
@@ -434,47 +479,53 @@ async function eliminarCita() {
     const id = document.getElementById('modalCita').getAttribute('data-edit-id');
     if (!id) return;
 
-    if (confirm("¿Estás segura de eliminar esta cita?")) {
-        try {
-            // 1. OBTENEMOS LOS DATOS (Rápido)
-            const cita = await db.agenda.get(parseInt(id));
-            
-            // 2. ACCIÓN INMEDIATA (Lo que ve el usuario)
-            // Borramos de la base de datos local y refrescamos la interfaz ya mismo
-            await db.agenda.delete(parseInt(id));
-            calendar.refetchEvents();
-            
-            // Cerramos el modal sin esperar a Google
-            const modalInstance = bootstrap.Modal.getInstance(document.getElementById('modalCita'));
-            if (modalInstance) modalInstance.hide();
+    Swal.fire({
+        ...swalConfig,
+        icon: 'warning',
+        title: '¿Eliminar cita?',
+        text: 'Esta acción no se puede deshacer.',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, eliminar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#444'
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            try {
+                // --- TU LÓGICA INTACTA DESDE AQUÍ ---
+                const cita = await db.agenda.get(parseInt(id));
+                
+                await db.agenda.delete(parseInt(id));
+                calendar.refetchEvents();
+                
+                // Cerramos el modal sin esperar a Google
+                const modalInstance = bootstrap.Modal.getInstance(document.getElementById('modalCita'));
+                if (modalInstance) modalInstance.hide();
 
-            console.log("Cita eliminada visualmente. Procesando en Google en segundo plano...");
+                console.log("Cita eliminada visualmente. Procesando en Google en segundo plano...");
 
-            // 3. PROCESO EN SEGUNDO PLANO (Google)
-            // Si tiene ID de Google, lo borramos, pero el usuario ya no tiene que esperar
-            if (cita && cita.googleEventId) {
-                // Si no hay token, lo pedimos (esto puede abrir el popup si es necesario)
-                if (!gapi.client.getToken() && tokenClient) {
-                    tokenClient.requestAccessToken({ prompt: '' });
-                    // Esperamos un poco solo para que el proceso de Google tenga tiempo de arrancar
-                    await new Promise(r => setTimeout(r, 500));
+                // 3. PROCESO EN SEGUNDO PLANO (Google)
+                if (cita && cita.googleEventId) {
+                    if (!gapi.client.getToken() && tokenClient) {
+                        tokenClient.requestAccessToken({ prompt: '' });
+                        await new Promise(r => setTimeout(r, 500));
+                    }
+
+                    eliminarEventoGoogle(cita.googleEventId).then(() => {
+                        console.log("✅ Borrado en Google completado");
+                    }).catch(err => {
+                        console.error("❌ Falló el borrado en Google, pero ya se quitó de la app:", err);
+                    });
                 }
+                // --- HASTA AQUÍ ---
 
-                // Llamamos a borrar pero ya no usamos 'await' de forma que bloquee la interfaz
-                eliminarEventoGoogle(cita.googleEventId).then(() => {
-                    console.log("✅ Borrado en Google completado");
-                }).catch(err => {
-                    console.error("❌ Falló el borrado en Google, pero ya se quitó de la app:", err);
-                });
+            } catch (error) {
+                console.error("Error al eliminar:", error);
+                const modalInstance = bootstrap.Modal.getInstance(document.getElementById('modalCita'));
+                if (modalInstance) modalInstance.hide();
             }
-
-        } catch (error) {
-            console.error("Error al eliminar:", error);
-            // Si algo falla, intentamos asegurar que al menos se cierre el modal
-            const modalInstance = bootstrap.Modal.getInstance(document.getElementById('modalCita'));
-            if (modalInstance) modalInstance.hide();
         }
-    }
+    });
 }
 
 // NO OLVIDES añadir esta función de apoyo si no la pusiste antes:
@@ -499,8 +550,16 @@ async function eliminarEventoGoogle(googleEventId) {
 // Al iniciar el cobro, ponemos el precio base del servicio en el input
 async function iniciarCobro() {
     const idCita = document.getElementById('modalCita').getAttribute('data-edit-id');
-    if (!idCita) return alert("Guarda la cita antes de cobrar.");
-
+    if (!idCita) {
+            Swal.fire({
+                ...swalConfig,
+                icon: 'info',
+                title: 'Paso necesario',
+                text: 'Primero debes guardar los datos de la cita antes de proceder al cobro.',
+                confirmButtonText: 'Entendido'
+            });
+            return;
+        }
     // 1. LEER EL SERVICIO SELECCIONADO EN PANTALLA (NO EL DE LA BD)
     const idServicioEnPantalla = parseInt(document.getElementById('selSer').value);
 
@@ -509,7 +568,13 @@ async function iniciarCobro() {
     const citaActual = await db.agenda.get(parseInt(idCita));
 
     if (!servicioReal || !citaActual) {
-        alert("Error al recuperar los datos del servicio o la cita.");
+        Swal.fire({
+            ...swalConfig,
+            icon: 'error',
+            title: 'Error de Recuperación',
+            text: 'No se han podido localizar los datos del servicio o la cita en el sistema.',
+            confirmButtonText: 'Cerrar'
+        });
         return;
     }
 
@@ -537,10 +602,16 @@ async function confirmarCobro() {
     const importeFinal = parseFloat(importeInput);
     const metodo = document.getElementById('metodoPago').value;
 
-    if (isNaN(importeFinal) || importeFinal < 0) {
-        alert("Por favor, introduce un importe válido.");
-        return;
-    }
+        if (isNaN(importeFinal) || importeFinal < 0) {
+            Swal.fire({
+                ...swalConfig,
+                icon: 'warning',
+                title: 'Importe no válido',
+                text: 'Por favor, introduce un número válido para el precio del servicio.',
+                confirmButtonText: 'Corregir'
+            });
+            return;
+        }
 
     try {
         // =====================================================
@@ -550,12 +621,24 @@ async function confirmarCobro() {
         const citaRealEnBD = await db.agenda.get(parseInt(citaParaCobrar.id));
 
         if (!citaRealEnBD) {
-            alert("Error: Esta cita parece haber sido eliminada.");
+        Swal.fire({
+            ...swalConfig,
+            icon: 'error',
+            title: 'Cita no encontrada',
+            text: 'No se puede procesar el cobro porque esta cita parece haber sido eliminada de la agenda.',
+            confirmButtonText: 'Cerrar'
+        });
             return;
         }
 
         if (citaRealEnBD.cobrado === true) {
-            alert("⚠️ Esta cita ya figura como COBRADA. No se puede volver a cobrar.");
+        Swal.fire({
+                    ...swalConfig,
+                    icon: 'warning',
+                    title: 'Cita ya cobrada',
+                    text: 'Esta cita ya figura como COBRADA en el sistema. No se puede generar un nuevo ingreso para el mismo servicio.',
+                    confirmButtonText: 'Entendido'
+                });
             // Cerramos el modal para evitar más intentos
             const modalCobroEl = document.getElementById('modalCobro');
             const modalInstance = bootstrap.Modal.getInstance(modalCobroEl);
@@ -600,53 +683,91 @@ async function confirmarCobro() {
         if (modalInstance) modalInstance.hide();
         
         // 5. Mensaje de éxito final
-        alert(importeFinal === 0 ? "Sesión de regalo registrada correctamente." : `Venta registrada: ${importeFinal}€`);
-
+        Swal.fire({
+                    ...swalConfig,
+                    icon: 'success',
+                    title: '¡Operación Exitosa!',
+                    text: importeFinal === 0 
+                        ? "Sesión de regalo registrada correctamente." 
+                        : `Venta registrada por un importe de ${importeFinal}€`,
+                    confirmButtonText: 'Excelente'
+                });
+        
     } catch (error) {
         console.error("Error al procesar el cobro:", error);
-        alert("Hubo un error al registrar la venta. Revisa la consola.");
+        Swal.fire({
+            ...swalConfig,
+            icon: 'error',
+            title: 'Error al Registrar Venta',
+            text: 'Hubo un error al registrar la venta. Revisa la consola para más detalles.',
+            confirmButtonText: 'Cerrar'
+        });
     }
 }
 
 
 async function revertirCobro(ventaId, citaId) {
-    if (!confirm("¿Segura que quieres anular este cobro? La cita volverá a estar pendiente y el progreso de la clienta se actualizará.")) return;
+    Swal.fire({
+        ...swalConfig,
+        icon: 'question',
+        title: '¿Anular este cobro?',
+        text: 'La cita volverá a estar pendiente y el progreso de la clienta se actualizará.',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, anular',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#444'
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            try {
+                // --- TU LÓGICA INTACTA DESDE AQUÍ ---
+                // 1. Eliminamos el registro de la venta
+                await db.ventas.delete(parseInt(ventaId));
 
-    try {
-        // 1. Eliminamos el registro de la venta
-        // Al borrar la venta, el 'motor' dejará de contarla automáticamente
-        await db.ventas.delete(parseInt(ventaId));
+                // 2. IMPORTANTE: Cambiamos el estado en la agenda a pendiente (cobrado: false)
+                if (citaId) {
+                    await db.agenda.update(parseInt(citaId), { cobrado: false });
+                }
 
-        // 2. IMPORTANTE: Cambiamos el estado en la agenda a pendiente (cobrado: false)
-        if (citaId) {
-            await db.agenda.update(parseInt(citaId), { cobrado: false });
+                // Forzamos la actualización de datos
+                if (typeof cargarHistorialVentas === 'function') {
+                    await cargarHistorialVentas(); 
+                }
+
+                // Forzamos la actualización de la lista de clientas (Fidelidad)
+                if (typeof listarClientas === 'function') {
+                    await listarClientas();
+                }
+                
+                // Si tienes el calendario, refresca también
+                if (typeof calendar !== 'undefined') calendar.refetchEvents();
+
+                // 5. ACTUALIZACIÓN DE BARRA: Refrescamos la lista de clientas
+                if (typeof listarClientas === 'function') {
+                    await listarClientas();
+                }
+
+                Swal.fire({
+                    ...swalConfig,
+                    icon: 'success',
+                    title: 'Anulación Completada',
+                    text: 'El cobro ha sido anulado. Se ha actualizado el historial y los puntos de fidelidad de la clienta correctamente.',
+                    confirmButtonText: 'Entendido'
+                });
+                // --- HASTA AQUÍ ---
+
+            } catch (error) {
+                console.error("Error al revertir el cobro:", error);
+                Swal.fire({
+                    ...swalConfig,
+                    icon: 'error',
+                    title: 'Error al Anular Cobro',
+                    text: 'No se pudo anular el cobro. Revisa la consola para más detalles.',
+                    confirmButtonText: 'Cerrar'
+                });
+            }
         }
-
-        // Forzamos la actualización de datos
-        if (typeof cargarHistorialVentas === 'function') {
-            await cargarHistorialVentas(); 
-        }
-
-        // Forzamos la actualización de la lista de clientas (Fidelidad)
-        if (typeof listarClientas === 'function') {
-            await listarClientas();
-        }
-        
-        // Si tienes el calendario, refresca también
-        if (typeof calendar !== 'undefined') calendar.refetchEvents();
-
-        // 5. ACTUALIZACIÓN DE BARRA: Refrescamos la lista de clientas
-        // Como la venta ya no existe (o el importe > 0 ya no está), la barra bajará sola
-        if (typeof listarClientas === 'function') {
-            await listarClientas();
-        }
-
-        alert("Cobro anulado correctamente. Se ha actualizado el historial y la fidelidad.");
-
-    } catch (error) {
-        console.error("Error al revertir el cobro:", error);
-        alert("No se pudo anular el cobro. Revisa la consola para más detalles.");
-    }
+    });
 }
 
 async function cargarHistorialVentas() {
@@ -839,7 +960,13 @@ async function guardarClienta() {
     };
 
     if (!datos.nombre) {
-        alert("Por favor, introduce al menos el nombre de la clienta.");
+        Swal.fire({
+            ...swalConfig,
+            icon: 'warning',
+            title: 'Nombre Requerido',
+            text: 'Por favor, introduce al menos el nombre de la clienta.',
+            confirmButtonText: 'Entendido'
+        });
         return;
     }
 
@@ -872,9 +999,24 @@ async function guardarClienta() {
         }
 
         if (advertencia) {
-            const decision = confirm(`${advertencia}\n\n¿Deseas guardar los cambios de todos modos?`);
-            if (!decision) return; 
-        }
+        Swal.fire({
+            ...swalConfig,
+            icon: 'warning',
+            title: 'Atención',
+            text: advertencia,
+            showCancelButton: true,
+            confirmButtonText: 'Sí, guardar de todos modos',
+            cancelButtonText: 'Revisar',
+            confirmButtonColor: '#d33', // Color de advertencia
+            cancelButtonColor: '#444'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                // Aquí ejecutas la función de guardado
+                ejecutarGuardado(); 
+            }
+        });
+        return; // Detiene la ejecución normal para esperar la decisión del SweetAlert
+    }
         // ----------------------------------------------------------
 
         if (idEdicion) {
@@ -897,7 +1039,13 @@ async function guardarClienta() {
 
     } catch (error) {
         console.error("Error al guardar clienta:", error);
-        alert("Hubo un error al guardar los datos.");
+        Swal.fire({
+            ...swalConfig,
+            icon: 'error',
+            title: 'Error al Guardar Clienta',
+            text: 'Hubo un error al guardar los datos. Revisa la consola para más detalles.',
+            confirmButtonText: 'Cerrar'
+        });
     }
 }
 
@@ -939,15 +1087,25 @@ async function prepararEdicionClienta(id) {
     // --- OPCIONAL: Si quieres mostrar los puntos dentro del modal ---
     // Si tienes un div con id="infoFidelidadModal" en tu HTML, podrías hacer:
     const contenedorPuntos = document.getElementById('infoFidelidadModal');
-    if (contenedorPuntos) {
+        if (contenedorPuntos) {
         contenedorPuntos.innerHTML = `
-            <div class="alert alert-dark border-gold mb-3">
-                <div class="d-flex justify-content-between mb-1">
-                    <span class="small fw-bold text-gold">SESIONES ACUMULADAS: ${estado.actual}/10</span>
-                    ${estado.tocaRegalo ? '<span class="badge bg-warning text-dark">¡REGALO LISTO!</span>' : ''}
+            <div class="alert alert-dark border-gold mb-3 shadow-sm" style="background-color: #1a1a1a;">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="small fw-bold text-gold" style="letter-spacing: 1px;">
+                        <i class="bi bi-star-fill me-1"></i> SESIONES ACUMULADAS: ${estado.actual}/10
+                    </span>
+                    ${estado.tocaRegalo ? 
+                        '<span class="badge bg-gold text-dark animate__animated animate__pulse animate__infinite">🎁 ¡REGALO LISTO!</span>' 
+                        : ''}
                 </div>
-                <div class="progress" style="height: 10px; background-color: #444;">
-                    <div class="progress-bar bg-gold" style="width: ${estado.porcentaje}%"></div>
+                <div class="progress" style="height: 12px; background-color: #333; border-radius: 10px; overflow: hidden;">
+                    <div class="progress-bar bg-gold" 
+                        role="progressbar" 
+                        style="width: ${estado.porcentaje}%; transition: width 1s ease-in-out;" 
+                        aria-valuenow="${estado.actual}" 
+                        aria-valuemin="0" 
+                        aria-valuemax="10">
+                    </div>
                 </div>
             </div>
         `;
@@ -1074,53 +1232,79 @@ async function ejecutarEliminarClienta() {
 
     if (!idOriginal) return;
 
-    if (confirm("¿Estás segura? Los datos personales se borrarán, pero el historial de ingresos se moverá a 'Ex-Clienta' para no perder tus estadísticas.")) {
-        try {
-            const clienteIdNum = parseInt(idOriginal);
+    Swal.fire({
+        ...swalConfig,
+        icon: 'warning',
+        title: '¿Confirmar baja definitiva?',
+        text: "Los datos personales se borrarán, pero el historial de ingresos se moverá a 'Ex-Clienta' para no perder tus estadísticas.",
+        showCancelButton: true,
+        confirmButtonText: 'Sí, dar de baja',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#444'
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            try {
+                // --- INICIO DE TU LÓGICA ORIGINAL (MÁXIMA ATENCIÓN) ---
+                const clienteIdNum = parseInt(idOriginal);
 
-            // 1. 🛡️ ASEGURAR QUE EXISTE EL PERFIL "EX-CLIENTA"
-            let exClienta = await db.clientas.where('nombre').equalsIgnoreCase('Ex-Clienta').first();
-            
-            if (!exClienta) {
-                // Si no existe, la creamos ahora mismo
-                const exId = await db.clientas.add({
-                    nombre: "Ex-Clienta",
-                    telefono: "000",
-                    observaciones: "Perfil genérico para mantener historial de bajas."
+                // 1. 🛡️ ASEGURAR QUE EXISTE EL PERFIL "EX-CLIENTA"
+                let exClienta = await db.clientas.where('nombre').equalsIgnoreCase('Ex-Clienta').first();
+                
+                if (!exClienta) {
+                    // Si no existe, la creamos ahora mismo
+                    const exId = await db.clientas.add({
+                        nombre: "Ex-Clienta",
+                        telefono: "000",
+                        observaciones: "Perfil genérico para mantener historial de bajas."
+                    });
+                    exClienta = { id: exId };
+                }
+
+                // 2. 🔄 TRASPASAR HISTORIAL (Citas y Ventas)
+                const citas = await db.agenda.where('clienteId').equals(clienteIdNum).toArray();
+                const ventas = await db.ventas.where('clienteId').equals(clienteIdNum).toArray();
+
+                // Actualizamos cada cita y venta para que ahora pertenezcan a "Ex-Clienta"
+                const promesasCitas = citas.map(c => db.agenda.update(c.id, { clienteId: exClienta.id }));
+                const promesasVentas = ventas.map(v => db.ventas.update(v.id, { clienteId: exClienta.id }));
+
+                await Promise.all([...promesasCitas, ...promesasVentas]);
+
+                // 3. 🗑️ BORRAR FICHA ORIGINAL
+                await db.clientas.delete(clienteIdNum);
+
+                // 4. FEEDBACK Y REFRESCAR
+                const modalInstance = bootstrap.Modal.getInstance(modalEl);
+                if (modalInstance) modalInstance.hide();
+
+                await listarClientas();
+                if (typeof actualizarSelectores === 'function') actualizarSelectores();
+                if (calendar) calendar.refetchEvents();
+                if (typeof cargarHistorialVentas === 'function') await cargarHistorialVentas();
+
+                // Mensaje de éxito final
+                Swal.fire({
+                    ...swalConfig,
+                    icon: 'success',
+                    title: 'Traspaso Finalizado',
+                    text: `El proceso se ha completado con éxito: se han movido ${citas.length} citas y ${ventas.length} ventas al perfil 'Ex-Clienta'.`,
+                    confirmButtonText: 'Entendido'
                 });
-                exClienta = { id: exId };
+                // --- FIN DE TU LÓGICA ORIGINAL ---
+                
+            } catch (error) {
+                console.error("Error en el traspaso de datos:", error);
+                Swal.fire({
+                    ...swalConfig,
+                    icon: 'error',
+                    title: 'Error en el Traspaso',
+                    text: 'Hubo un fallo al intentar mover el historial. Revisa la consola para más detalles.',
+                    confirmButtonText: 'Cerrar'
+                });
             }
-
-            // 2. 🔄 TRASPASAR HISTORIAL (Citas y Ventas)
-            // Buscamos todas las citas y ventas de la clienta que vamos a borrar
-            const citas = await db.agenda.where('clienteId').equals(clienteIdNum).toArray();
-            const ventas = await db.ventas.where('clienteId').equals(clienteIdNum).toArray();
-
-            // Actualizamos cada cita y venta para que ahora pertenezcan a "Ex-Clienta"
-            const promesasCitas = citas.map(c => db.agenda.update(c.id, { clienteId: exClienta.id }));
-            const promesasVentas = ventas.map(v => db.ventas.update(v.id, { clienteId: exClienta.id }));
-
-            await Promise.all([...promesasCitas, ...promesasVentas]);
-
-            // 3. 🗑️ BORRAR FICHA ORIGINAL
-            await db.clientas.delete(clienteIdNum);
-
-            // 4. FEEDBACK Y REFRESCAR
-            const modalInstance = bootstrap.Modal.getInstance(modalEl);
-            if (modalInstance) modalInstance.hide();
-
-            await listarClientas();
-            if (typeof actualizarSelectores === 'function') actualizarSelectores();
-            if (calendar) calendar.refetchEvents();
-            if (typeof cargarHistorialVentas === 'function') await cargarHistorialVentas();
-
-            alert(`Proceso finalizado. Se han movido ${citas.length} citas y ${ventas.length} ventas al perfil 'Ex-Clienta'.`);
-
-        } catch (error) {
-            console.error("Error en el traspaso de datos:", error);
-            alert("Hubo un fallo al intentar mover el historial.");
         }
-    }
+    });
 }
 
 async function guardarServicio() {
@@ -1133,7 +1317,13 @@ async function guardarServicio() {
     };
 
     if (!datos.nombre || isNaN(datos.coste)) {
-        alert("Por favor, completa nombre y precio.");
+        Swal.fire({
+            ...swalConfig,
+            icon: 'error',
+            title: 'Error al Guardar Servicio',
+            text: 'Por favor, completa nombre y precio.',
+            confirmButtonText: 'Cerrar'
+        });
         return;
     }
 
@@ -1155,11 +1345,38 @@ async function guardarServicio() {
 }
 
 async function eliminarServicio(id) {
-    if (confirm("¿Seguro que quieres eliminar este servicio?")) {
-        await db.servicios.delete(id);
-        listarServicios();
-        if(typeof actualizarSelectores === 'function') actualizarSelectores();
-    }
+    Swal.fire({
+        ...swalConfig,
+        icon: 'warning',
+        title: '¿Eliminar servicio?',
+        text: 'Este servicio dejará de aparecer como opción para nuevas citas.',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, eliminar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#444'
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            try {
+                // --- LÓGICA ORIGINAL ---
+                await db.servicios.delete(id);
+                listarServicios();
+                if(typeof actualizarSelectores === 'function') actualizarSelectores();
+                
+                // Pequeño aviso de confirmación (opcional, pero recomendado para feedback)
+                Swal.fire({
+                    ...swalConfig,
+                    icon: 'success',
+                    title: 'Servicio eliminado',
+                    timer: 1500,
+                    showConfirmButton: false
+                });
+                // -----------------------
+            } catch (error) {
+                console.error("Error al eliminar servicio:", error);
+            }
+        }
+    });
 }
 
 function abrirModalNuevoServicio() {
@@ -1228,15 +1445,54 @@ async function ejecutarEliminarServicio() {
     const modalEl = document.getElementById('modalServicio');
     const id = modalEl.getAttribute('data-edit-id');
 
-    if (id && confirm("¿Estás segura de que quieres eliminar este servicio definitivamente?")) {
-        await db.servicios.delete(parseInt(id));
-        
-        // Cerramos modal y refrescamos todo
-        bootstrap.Modal.getInstance(modalEl).hide();
-        listarServicios();
-        if(typeof actualizarSelectores === 'function') actualizarSelectores();
+    if (id) {
+        Swal.fire({
+            ...swalConfig,
+            icon: 'warning',
+            title: '¿Eliminar servicio?',
+            text: '¿Estás segura de que quieres eliminar este servicio definitivamente?',
+            showCancelButton: true,
+            confirmButtonText: 'Sí, eliminar',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#444'
+        }).then(async (result) => {
+            if (result.isConfirmed) {
+                try {
+                    // 1. Borramos de la base de datos
+                    await db.servicios.delete(parseInt(id));
+                    
+                    // 2. Cerramos el modal SOLO si se confirma y se borra
+                    const modalInstance = bootstrap.Modal.getInstance(modalEl);
+                    if (modalInstance) modalInstance.hide();
+                    
+                    // 3. Refrescamos las listas y selectores
+                    if (typeof listarServicios === 'function') listarServicios();
+                    if (typeof actualizarSelectores === 'function') actualizarSelectores();
+                    
+                    // 4. Aviso de éxito
+                    Swal.fire({
+                        ...swalConfig,
+                        icon: 'success',
+                        title: 'Eliminado',
+                        text: 'El servicio ha sido quitado del catálogo.',
+                        timer: 1500,
+                        showConfirmButton: false
+                    });
+
+                } catch (error) {
+                    console.error("Error al eliminar servicio:", error);
+                    Swal.fire({
+                        ...swalConfig,
+                        icon: 'error',
+                        title: 'Error',
+                        text: 'No se pudo eliminar el servicio.'
+                    });
+                }
+            }
+        });
     }
-}
+} 
 
 async function actualizarSelectores() {
     const clis = await db.clientas.toArray();
@@ -1265,37 +1521,63 @@ async function forzarDesbloqueo() {
     const idCita = document.getElementById('modalCita').getAttribute('data-edit-id');
     if (!idCita) return;
 
-    if (confirm("Esta cita está cobrada. Si la desbloqueas para editarla, se eliminará el registro de pago de las estadísticas. ¿Deseas continuar?")) {
-        try {
-            // 1. Buscamos la venta
-            const venta = await db.ventas.where('citaId').equals(parseInt(idCita)).first();
-            
-            // 2. Si existe, intentamos borrarla. Si NO existe, avisamos (error de integridad)
-            if (venta) {
-                await db.ventas.delete(venta.id);
-            } else {
-                console.warn("No se encontró una venta vinculada a esta cita, pero procederemos a desbloquear.");
+    Swal.fire({
+        ...swalConfig,
+        icon: 'warning',
+        title: '¿Desbloquear cita cobrada?',
+        text: 'Si la desbloqueas para editarla, se eliminará el registro de pago de las estadísticas. ¿Deseas continuar?',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, desbloquear',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#444'
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            try {
+                // --- INICIO DE TU LÓGICA ORIGINAL ---
+                // 1. Buscamos la venta
+                const venta = await db.ventas.where('citaId').equals(parseInt(idCita)).first();
+                
+                // 2. Si existe, intentamos borrarla. Si NO existe, avisamos
+                if (venta) {
+                    await db.ventas.delete(venta.id);
+                } else {
+                    console.warn("No se encontró una venta vinculada a esta cita, pero procederemos a desbloquear.");
+                }
+
+                // 3. SOLO si el paso anterior no dio error, actualizamos la agenda
+                await db.agenda.update(parseInt(idCita), { cobrado: false });
+
+                // 4. Refresco total de la interfaz
+                if (calendar) calendar.refetchEvents();
+                if (typeof cargarHistorialVentas === 'function') await cargarHistorialVentas();
+                if (typeof listarClientas === 'function') await listarClientas();
+                
+                // 5. Cerrar modal al final de todo el proceso exitoso
+                const modalEl = document.getElementById('modalCita');
+                const modalInstance = bootstrap.Modal.getInstance(modalEl);
+                if (modalInstance) modalInstance.hide();
+
+                Swal.fire({
+                    ...swalConfig,
+                    icon: 'success',
+                    title: 'Cita Desbloqueada',
+                    text: 'Los registros de venta han sido eliminados correctamente.',
+                    confirmButtonText: 'Entendido'
+                });
+                // --- FIN DE TU LÓGICA ORIGINAL ---
+
+            } catch (error) {
+                console.error("Error al desbloquear:", error);
+                Swal.fire({
+                    ...swalConfig,
+                    icon: 'error',
+                    title: 'Error',
+                    text: 'No se pudo completar el desbloqueo. Revisa la consola.'
+                });
             }
-
-            // 3. SOLO si el paso anterior no dio error, actualizamos la agenda
-            await db.agenda.update(parseInt(idCita), { cobrado: false });
-
-            // 4. Refresco total de la interfaz (Añadimos el gráfico aquí también)
-            if (calendar) calendar.refetchEvents();
-            if (typeof cargarHistorialVentas === 'function') await cargarHistorialVentas();
-            if (typeof listarClientas === 'function') await listarClientas();
-            
-            // 5. Cerrar modal al final de todo el proceso exitoso
-            const modalEl = document.getElementById('modalCita');
-            const modalInstance = bootstrap.Modal.getInstance(modalEl);
-            if (modalInstance) modalInstance.hide();
-
-            alert("Cita desbloqueada. Los registros de venta han sido eliminados.");
-
-        } catch (error) {
-            console.error("Error al desbloquear:", error);
         }
-    }
+    });
 }
 
 
@@ -1346,11 +1628,23 @@ async function exportarBackup() {
         }, 500);
 
         // Mensaje de éxito manual
-        alert("¡Copia de seguridad creada!\n\nBusca el archivo '" + nombreArchivo + "' en la carpeta de Descargas de tu tablet.");
+        Swal.fire({
+            ...swalConfig,
+            icon: 'success',
+            title: 'Copia de Seguridad Creada',
+            text: `¡Copia de seguridad creada!\n\nBusca el archivo '${nombreArchivo}' en la carpeta de Descargas de tu tablet.`,
+            confirmButtonText: 'Entendido'
+        });
 
     } catch (error) {
         console.error("Error en backup:", error);
-        alert("Error al acceder a la base de datos. Asegúrate de que no tienes otras pestañas abiertas.");
+        Swal.fire({
+            ...swalConfig,
+            icon: 'error',
+            title: 'Error en Backup',
+            text: 'Error al acceder a la base de datos. Asegúrate de que no tienes otras pestañas abiertas.',
+            confirmButtonText: 'Cerrar'
+        });
     }
 }
 
@@ -1359,50 +1653,81 @@ async function importarBackup(event) {
     const archivo = event.target.files[0];
     if (!archivo) return;
 
-    // Confirmación de seguridad
-    const confirmar = confirm("¿Estás segura? Esto reemplazará todos los datos actuales de la tablet por los del archivo.");
-    if (!confirmar) return;
+    // Confirmación de seguridad con SweetAlert2
+    Swal.fire({
+        ...swalConfig,
+        icon: 'warning',
+        title: '¿Reemplazar todos los datos?',
+        text: 'Esto borrará toda la información actual de la tablet y la sustituirá por la del archivo. Esta acción es irreversible.',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, restaurar todo',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#444'
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const contenido = JSON.parse(e.target.result);
+                    
+                    // --- 🛡️ ESCUDO DE INTEGRIDAD ---
+                    const tablas = contenido.tablas;
+                    if (!tablas || !tablas.clientas || !tablas.servicios || !tablas.agenda || !tablas.ventas) {
+                        throw new Error("El archivo de copia está incompleto o el formato no es válido.");
+                    }
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-        try {
-            const contenido = JSON.parse(e.target.result);
-            
-            // --- 🛡️ ESCUDO DE INTEGRIDAD (Antes de borrar nada) ---
-            const tablas = contenido.tablas;
-            if (!tablas || !tablas.clientas || !tablas.servicios || !tablas.agenda || !tablas.ventas) {
-                throw new Error("El archivo de copia está incompleto o el formato no es válido.");
-            }
+                    // 1. Limpieza de base de datos
+                    await Promise.all([
+                        db.clientas.clear(),
+                        db.servicios.clear(),
+                        db.agenda.clear(),
+                        db.ventas.clear()
+                    ]);
 
-            // Opcional: Validar que no sean arrays vacíos si te preocupa, 
-            // aunque a veces un backup puede tener 0 ventas.
-            // -------------------------------------------------------
+                    // 2. Inserción de nuevos datos
+                    await Promise.all([
+                        db.clientas.bulkAdd(tablas.clientas || []),
+                        db.servicios.bulkAdd(tablas.servicios || []),
+                        db.agenda.bulkAdd(tablas.agenda || []),
+                        db.ventas.bulkAdd(tablas.ventas || [])
+                    ]);
 
-            // 1. Si el archivo es válido, procedemos a limpiar
-            await Promise.all([
-                db.clientas.clear(),
-                db.servicios.clear(),
-                db.agenda.clear(),
-                db.ventas.clear()
-            ]);
+                    // Éxito
+                    Swal.fire({
+                        ...swalConfig,
+                        icon: 'success',
+                        title: '¡Sistema Restaurado!',
+                        text: 'Los datos se han volcado correctamente. La página se recargará ahora.',
+                        confirmButtonText: 'Genial',
+                        willClose: () => {
+                            location.reload(); 
+                        }
+                    });
 
-            // 2. Insertamos los datos asegurando que existen (fallback a array vacío si falla algo)
-            await Promise.all([
-                db.clientas.bulkAdd(tablas.clientas || []),
-                db.servicios.bulkAdd(tablas.servicios || []),
-                db.agenda.bulkAdd(tablas.agenda || []),
-                db.ventas.bulkAdd(tablas.ventas || [])
-            ]);
-
-            alert("¡Éxito! Datos restaurados correctamente.");
-            location.reload(); 
-
-        } catch (error) {
-            console.error("Error al importar:", error);
-            alert("⚠️ ERROR CRÍTICO: " + error.message + "\n\nNo se han realizado cambios en tus datos actuales.");
+                } catch (error) {
+                    console.error("Error al importar:", error);
+                    Swal.fire({
+                        ...swalConfig,
+                        icon: 'error',
+                        title: '¡Error Crítico!',
+                        html: `
+                            <p>No se han realizado cambios en tus datos actuales.</p>
+                            <div style="background: #333; padding: 10px; border-radius: 5px; color: #ff5f5f; font-family: monospace; font-size: 0.85em; margin-top: 15px;">
+                                ${error.message}
+                            </div>
+                        `,
+                        confirmButtonText: 'Entendido',
+                        confirmButtonColor: '#d33'
+                    });
+                }
+            };
+            reader.readAsText(archivo);
+        } else {
+            // Si cancela, reseteamos el input file para que pueda volver a elegir el mismo archivo si quiere
+            event.target.value = "";
         }
-    };
-    reader.readAsText(archivo);
+    });
 }
 
 async function actualizarSugerenciasLocalidad() {
@@ -1687,7 +2012,13 @@ async function crearEventoGoogle(cita) {
         console.error('❌ Error creando evento en Google:', err);
         // Si el error es 401, es que el token ha caducado y hay que volver a conectar
         if (err.status === 401) {
-            alert("La sesión de Google ha caducado. Por favor, pulsa 'Conectar Calendario' de nuevo.");
+            Swal.fire({
+                ...swalConfig,
+                icon: 'error',
+                title: 'Sesión de Google Caducada',
+                text: 'La sesión de Google ha caducado. Por favor, pulsa "Conectar Calendario" de nuevo.',
+                confirmButtonText: 'Entendido'
+            });
         }
     }
 }
@@ -1738,7 +2069,13 @@ function manejarAuthClick() {
         tokenClient.requestAccessToken({ prompt: 'consent' });
     } else {
         console.error("Error: El cliente de Google no se ha cargado.");
-        alert("La librería de Google aún se está cargando, espera un segundo.");
+        Swal.fire({
+            ...swalConfig,
+            icon: 'error',
+            title: 'Error de Conexión',
+            text: 'La librería de Google aún se está cargando, espera un segundo.',
+            confirmButtonText: 'Entendido'
+        });
     }
 }
 
