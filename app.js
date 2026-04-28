@@ -38,15 +38,24 @@ async function checkCumpleaños() {
         const hoy = new Date();
         const diaHoy = hoy.getDate();
         const mesHoy = hoy.getMonth() + 1;
-        const añoActual = hoy.getFullYear(); // <-- 1. Necesitamos el año actual
+        const añoActual = hoy.getFullYear();
 
-        const todas = await db.clientas.toArray();
+        // Formateamos el día/mes como "D/M" para comparar directamente con el string
+        const hoyStr = `${diaHoy}/${mesHoy}`;
+
+        // 🛡️ MEJORA DE RENDIMIENTO:
+        // En lugar de traer todas, filtramos de forma más eficiente
+        // Buscamos clientas que tengan fecha de nacimiento y cuyo último cumple no sea este año
+        const posibles = await db.clientas
+            .where('fechaNacimiento')
+            .notEqual("")
+            .filter(c => c.ultimoCumpleFelicitado !== añoActual)
+            .toArray();
         
-        const cumpleañeras = todas.filter(c => {
-            if (!c.fechaNacimiento || c.fechaNacimiento === "") return false;
-
+        const cumpleañeras = posibles.filter(c => {
             let diaNac, mesNac;
 
+            // Manejo robusto de formatos (Soporta "1/5" y "2024-05-01")
             if (c.fechaNacimiento.includes('/')) {
                 const partes = c.fechaNacimiento.split('/');
                 diaNac = parseInt(partes[0]);
@@ -54,20 +63,21 @@ async function checkCumpleaños() {
             } 
             else if (c.fechaNacimiento.includes('-')) {
                 const f = new Date(c.fechaNacimiento);
-                diaNac = f.getDate();
-                mesNac = f.getMonth() + 1;
+                // Si la fecha es inválida, saltamos
+                if (isNaN(f.getTime())) return false;
+                diaNac = f.getUTCDate(); // Usamos UTC para evitar líos de zona horaria
+                mesNac = f.getUTCMonth() + 1;
             }
 
-            // 2. MODIFICAMOS EL RETURN:
-            // Es su cumple SI coincide el día/mes Y NO ha sido felicitada este año
-            return diaNac === diaHoy && 
-                   mesNac === mesHoy && 
-                   c.ultimoCumpleFelicitado !== añoActual; 
+            return diaNac === diaHoy && mesNac === mesHoy;
         });
 
         if (cumpleañeras.length > 0) {
-            console.log("¡Cumpleaños detectados!", cumpleañeras);
-            mostrarAlertaCumple(cumpleañeras);
+            console.log("🎂 ¡Cumpleaños detectados!", cumpleañeras);
+            
+            // Pasamos añoActual para que la función que muestra la alerta 
+            // pueda marcar a la clienta como "felicitada este año"
+            mostrarAlertaCumple(cumpleañeras, añoActual);
         }
     } catch (error) {
         console.error("Error al comprobar cumpleaños:", error);
@@ -328,75 +338,96 @@ async function agendarCita() {
     const servicioId = parseInt(document.getElementById('selSer').value);
     const fecha = document.getElementById('citaFecha').value;
 
+    // 1. Validación de campos vacíos
     if (!clienteId || !servicioId || !fecha) {
-        alert("Por favor, rellena todos los campos.");
+        alert("Por favor, selecciona clienta, servicio y fecha.");
         return;
     }
 
-    // --- NUEVO: Obtener datos para Google Calendar ---
-    const cliente = await db.clientas.get(clienteId);
-    const servicio = await db.servicios.get(servicioId);
-    
+    // --- 🛡️ ESCUDO DE INTEGRIDAD ---
+    const [cliente, servicio] = await Promise.all([
+        db.clientas.get(clienteId),
+        db.servicios.get(servicioId)
+    ]);
+
+    if (!cliente || !servicio) {
+        alert("Error: La clienta o el servicio seleccionados ya no existen.");
+        return;
+    }
+
+    if (editId) {
+        const citaExistente = await db.agenda.get(parseInt(editId));
+        if (citaExistente && citaExistente.cobrado) {
+            alert("⚠️ No puedes modificar una cita que ya ha sido cobrada.");
+            return;
+        }
+    }
+
     const datosCita = {
-        nombreClienta: cliente ? cliente.nombre : "Cliente",
-        servicio: servicio ? servicio.nombre : "Servicio",
-        fechaInicio: fecha, // Formato que viene del input datetime-local
-        // Calculamos el fin (por ejemplo, +1 hora)
+        nombreClienta: cliente.nombre,
+        servicio: servicio.nombre,
+        fechaInicio: fecha,
         fechaFin: new Date(new Date(fecha).getTime() + 60 * 60 * 1000).toISOString()
     };
 
     let idFinal;
 
-    if (editId) {
-        idFinal = parseInt(editId);
-        await db.agenda.update(idFinal, {
-            clienteId: clienteId,
-            servicioId: servicioId,
-            fecha: fecha
-        });
-    } else {
-        idFinal = await db.agenda.add({
-            clienteId: clienteId,
-            servicioId: servicioId,
-            fecha: fecha,
-            cobrado: false
-        });
-    }
+    try {
+        // --- OPERACIÓN EN BASE DE DATOS LOCAL ---
+        if (editId) {
+            idFinal = parseInt(editId);
+            await db.agenda.update(idFinal, {
+                clienteId: clienteId,
+                servicioId: servicioId,
+                fecha: fecha
+            });
+        } else {
+            idFinal = await db.agenda.add({
+                clienteId: clienteId,
+                servicioId: servicioId,
+                fecha: fecha,
+                cobrado: false
+            });
+        }
+        
+        // --- INTEGRACIÓN CON GOOGLE CALENDAR ---
+        if (typeof gapi !== 'undefined') {
+            try {
+                if (gapi.client.getToken() === null && typeof tokenClient !== 'undefined') {
+                    console.log("Sesión no detectada, intentando auto-conexión...");
+                    tokenClient.requestAccessToken({ prompt: '' });
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
 
-    // --- INTEGRACIÓN CON GOOGLE CALENDAR MEJORADA ---
-    if (typeof gapi !== 'undefined') {
-        try {
-            if (gapi.client.getToken() === null && tokenClient) {
-                console.log("Sesión no detectada, intentando auto-conexión...");
-                tokenClient.requestAccessToken({ prompt: '' });
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
+                if (gapi.client.calendar && gapi.client.getToken() !== null) {
+                    const citaActualizada = await db.agenda.get(idFinal);
 
-            if (gapi.client.calendar && gapi.client.getToken() !== null) {
-                // --- CAMBIO ESENCIAL AQUÍ ---
-                const citaActualizada = await db.agenda.get(idFinal);
-
-                if (editId && citaActualizada.googleEventId) {
-                    // Si es edición y ya existe en Google, actualizamos
-                    await actualizarEventoGoogle(citaActualizada.googleEventId, datosCita);
-                } else {
-                    // Si es nueva o no tenía ID previo, creamos
-                    const googleId = await crearEventoGoogle(datosCita);
-                    if (googleId) {
-                        await db.agenda.update(idFinal, { googleEventId: googleId });
-                        console.log("✅ Cita creada y sincronizada en Google");
+                    if (editId && citaActualizada.googleEventId) {
+                        await actualizarEventoGoogle(citaActualizada.googleEventId, datosCita);
+                    } else {
+                        const googleId = await crearEventoGoogle(datosCita);
+                        if (googleId) {
+                            await db.agenda.update(idFinal, { googleEventId: googleId });
+                            console.log("✅ Cita sincronizada en Google");
+                        }
                     }
                 }
-                // -----------------------------
+            } catch (errorGoogle) {
+                console.error("Error al sincronizar con Google:", errorGoogle);
+                // No lanzamos alert aquí para que la cita se guarde en local aunque Google falle
             }
-        } catch (error) {
-            console.error("Error al sincronizar con Google:", error);
         }
-    }
 
-    calendar.refetchEvents();
-    const modalInstance = bootstrap.Modal.getInstance(modalEl);
-    if (modalInstance) modalInstance.hide();
+        // --- FINALIZACIÓN ---
+        if (typeof calendar !== 'undefined') calendar.refetchEvents();
+        
+        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+        if (modalInstance) modalInstance.hide();
+
+    } catch (error) {
+        console.error("Error al agendar la cita:", error);
+        alert("Hubo un fallo al guardar la cita en la base de datos.");
+    }
 }
 
 async function eliminarCita() {
@@ -512,8 +543,28 @@ async function confirmarCobro() {
     }
 
     try {
+        // =====================================================
+        // 🛡️ PASO 0: ESCUDO DE SEGURIDAD (Validación de BD)
+        // =====================================================
+        // Buscamos el estado REAL de la cita en la base de datos
+        const citaRealEnBD = await db.agenda.get(parseInt(citaParaCobrar.id));
+
+        if (!citaRealEnBD) {
+            alert("Error: Esta cita parece haber sido eliminada.");
+            return;
+        }
+
+        if (citaRealEnBD.cobrado === true) {
+            alert("⚠️ Esta cita ya figura como COBRADA. No se puede volver a cobrar.");
+            // Cerramos el modal para evitar más intentos
+            const modalCobroEl = document.getElementById('modalCobro');
+            const modalInstance = bootstrap.Modal.getInstance(modalCobroEl);
+            if (modalInstance) modalInstance.hide();
+            return;
+        }
+        // =====================================================
+
         // 1. Guardamos la venta asegurando IDs numéricos
-        // Si importeFinal es 0, la función obtenerEstadoFidelidad lo ignorará automáticamente
         await db.ventas.add({
             citaId: parseInt(citaParaCobrar.id), 
             clienteId: parseInt(citaParaCobrar.clienteId),
@@ -523,46 +574,37 @@ async function confirmarCobro() {
             metodoPago: metodo
         });
 
-        // 2. Marcamos la cita como cobrada
+        // 2. Marcamos la cita como cobrada en la agenda
         await db.agenda.update(parseInt(citaParaCobrar.id), { cobrado: true });
         
-        // Forzamos la actualización de datos
+        // 3. ACTUALIZACIÓN DE INTERFAZ (Una sola vez cada una)
+        
+        // Refrescar el Historial de Ventas/Estadísticas
         if (typeof cargarHistorialVentas === 'function') {
             await cargarHistorialVentas(); 
         }
 
-        // Forzamos la actualización de la lista de clientas (Fidelidad)
+        // Refrescar la Lista de Clientas (Para que suban los puntos/fidelidad)
         if (typeof listarClientas === 'function') {
             await listarClientas();
         }
         
-        // Si tienes el calendario, refresca también
-        if (typeof calendar !== 'undefined') calendar.refetchEvents();
-
-        // 3. Actualizamos el calendario
-        if (calendar) calendar.refetchEvents();
+        // Refrescar el Calendario
+        if (typeof calendar !== 'undefined' && calendar) {
+            calendar.refetchEvents();
+        }
         
-        // 4. Cerramos el modal
+        // 4. Cerrar el modal
         const modalCobroEl = document.getElementById('modalCobro');
         const modalInstance = bootstrap.Modal.getInstance(modalCobroEl);
         if (modalInstance) modalInstance.hide();
         
-        // 5. Actualizamos el historial de ventas si existe la función
-        if (typeof cargarHistorialVentas === 'function') {
-            await cargarHistorialVentas();
-        }
-
-        // 6. ACTUALIZACIÓN CRÍTICA: Refrescamos la lista de clientas 
-        // para que la barra de progreso suba (o no, si el cobro fue 0€)
-        if (typeof listarClientas === 'function') {
-            await listarClientas();
-        }
-
+        // 5. Mensaje de éxito final
         alert(importeFinal === 0 ? "Sesión de regalo registrada correctamente." : `Venta registrada: ${importeFinal}€`);
 
     } catch (error) {
         console.error("Error al procesar el cobro:", error);
-        alert("Hubo un error al registrar la venta.");
+        alert("Hubo un error al registrar la venta. Revisa la consola.");
     }
 }
 
@@ -779,9 +821,8 @@ function abrirModalNuevoCliente() {
 
 async function guardarClienta() {
     const modalEl = document.getElementById('modalClienta');
-    const id = modalEl.getAttribute('data-edit-id');
+    const idEdicion = modalEl.getAttribute('data-edit-id');
     
-    // Recogemos Día y Mes para formar el string de cumpleaños
     const dia = document.getElementById('selectDia').value;
     const mes = document.getElementById('selectMes').value;
     const cumpleStr = (dia && mes) ? `${dia}/${mes}` : "";
@@ -790,38 +831,64 @@ async function guardarClienta() {
         nombre: document.getElementById('inputNombre').value,
         telefono: document.getElementById('inputTelefono').value,
         email: document.getElementById('inputEmail').value,
-        fechaNacimiento: cumpleStr, // Guardado como "Día/Mes"
+        fechaNacimiento: cumpleStr,
         direccion: document.getElementById('inputDireccion').value,
         cp: document.getElementById('inputCP').value,
         localidad: document.getElementById('inputLocalidad').value,
         observaciones: document.getElementById('inputObservaciones').value
     };
 
-    // Validación mínima
     if (!datos.nombre) {
         alert("Por favor, introduce al menos el nombre de la clienta.");
         return;
     }
 
     try {
-        if (id) {
-            // Editando clienta existente
-            await db.clientas.update(parseInt(id), datos);
+        // --- 🛡️ ESCUDO GLOBAL DE DUPLICADOS (Para Nuevo y Edición) ---
+        
+        const normalizar = (texto) => 
+            texto ? texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+
+        const nombreBusqueda = normalizar(datos.nombre);
+        const todasLasClientas = await db.clientas.toArray();
+
+        // Buscamos coincidencias EXCLUYENDO a la clienta que estamos editando actualmente
+        const nombreRepetido = todasLasClientas.find(c => 
+            normalizar(c.nombre) === nombreBusqueda && c.id !== parseInt(idEdicion)
+        );
+
+        const telRepetido = datos.telefono 
+            ? todasLasClientas.find(c => c.telefono === datos.telefono && c.id !== parseInt(idEdicion)) 
+            : null;
+
+        let advertencia = "";
+
+        if (nombreRepetido && telRepetido && telRepetido.id === nombreRepetido.id) {
+            advertencia = `⚠️ ¡CUIDADO! Los datos coinciden totalmente con otra ficha existente (${nombreRepetido.nombre}).`;
+        } else if (nombreRepetido) {
+            advertencia = `⚠️ AVISO: Ya existe otra clienta con el nombre "${nombreRepetido.nombre}".`;
+        } else if (telRepetido) {
+            advertencia = `⚠️ AVISO: El teléfono "${datos.telefono}" ya lo tiene asignado: ${telRepetido.nombre}.`;
+        }
+
+        if (advertencia) {
+            const decision = confirm(`${advertencia}\n\n¿Deseas guardar los cambios de todos modos?`);
+            if (!decision) return; 
+        }
+        // ----------------------------------------------------------
+
+        if (idEdicion) {
+            await db.clientas.update(parseInt(idEdicion), datos);
             console.log("Clienta actualizada con éxito");
         } else {
-            // Añadiendo nueva clienta
             await db.clientas.add(datos);
             console.log("Nueva clienta añadida con éxito");
         }
 
-        // Refrescar la interfaz
-        listarClientas();
-        if (typeof actualizarSelectores === "function"){
-            await listarClientas();
-        } 
-        actualizarSelectores();
+        // Refrescar y cerrar
+        await listarClientas();
+        if (typeof actualizarSelectores === "function") actualizarSelectores();
         
-        // Cerrar modal y limpiar
         const modalInstance = bootstrap.Modal.getInstance(modalEl);
         if (modalInstance) modalInstance.hide();
         
@@ -1002,42 +1069,56 @@ async function listarClientas() {
 }
 
 async function ejecutarEliminarClienta() {
-    // 1. Buscamos el modal para extraer el ID de la clienta que estamos editando
     const modalEl = document.getElementById('modalClienta');
-    const id = modalEl.getAttribute('data-edit-id');
+    const idOriginal = modalEl.getAttribute('data-edit-id');
 
-    // Si no hay ID, significa que el modal está vacío (Nueva Clienta)
-    if (!id) {
-        alert("No hay ninguna clienta seleccionada para eliminar.");
-        return;
-    }
+    if (!idOriginal) return;
 
-    // 2. Confirmación de seguridad para evitar sustos
-    if (confirm("¿Estás segura? Se borrará la ficha de la clienta permanentemente.")) {
+    if (confirm("¿Estás segura? Los datos personales se borrarán, pero el historial de ingresos se moverá a 'Ex-Clienta' para no perder tus estadísticas.")) {
         try {
-            // 3. Borramos de la tabla 'clientas' en Dexie
-            await db.clientas.delete(parseInt(id));
+            const clienteIdNum = parseInt(idOriginal);
 
-            // 4. Cerramos el modal de Bootstrap
+            // 1. 🛡️ ASEGURAR QUE EXISTE EL PERFIL "EX-CLIENTA"
+            let exClienta = await db.clientas.where('nombre').equalsIgnoreCase('Ex-Clienta').first();
+            
+            if (!exClienta) {
+                // Si no existe, la creamos ahora mismo
+                const exId = await db.clientas.add({
+                    nombre: "Ex-Clienta",
+                    telefono: "000",
+                    observaciones: "Perfil genérico para mantener historial de bajas."
+                });
+                exClienta = { id: exId };
+            }
+
+            // 2. 🔄 TRASPASAR HISTORIAL (Citas y Ventas)
+            // Buscamos todas las citas y ventas de la clienta que vamos a borrar
+            const citas = await db.agenda.where('clienteId').equals(clienteIdNum).toArray();
+            const ventas = await db.ventas.where('clienteId').equals(clienteIdNum).toArray();
+
+            // Actualizamos cada cita y venta para que ahora pertenezcan a "Ex-Clienta"
+            const promesasCitas = citas.map(c => db.agenda.update(c.id, { clienteId: exClienta.id }));
+            const promesasVentas = ventas.map(v => db.ventas.update(v.id, { clienteId: exClienta.id }));
+
+            await Promise.all([...promesasCitas, ...promesasVentas]);
+
+            // 3. 🗑️ BORRAR FICHA ORIGINAL
+            await db.clientas.delete(clienteIdNum);
+
+            // 4. FEEDBACK Y REFRESCAR
             const modalInstance = bootstrap.Modal.getInstance(modalEl);
             if (modalInstance) modalInstance.hide();
 
-            // 5. Refrescamos la lista de clientas en pantalla
-            if (typeof listarClientas === 'function') {
-                listarClientas();
-            } else if (typeof listarClientes === 'function') {
-                listarClientes();
-            }
+            await listarClientas();
+            if (typeof actualizarSelectores === 'function') actualizarSelectores();
+            if (calendar) calendar.refetchEvents();
+            if (typeof cargarHistorialVentas === 'function') await cargarHistorialVentas();
 
-            // 6. Actualizamos los desplegables de las citas
-            if (typeof actualizarSelectores === 'function') {
-                actualizarSelectores();
-            }
+            alert(`Proceso finalizado. Se han movido ${citas.length} citas y ${ventas.length} ventas al perfil 'Ex-Clienta'.`);
 
-            console.log("Clienta eliminada correctamente.");
         } catch (error) {
-            console.error("Error al eliminar:", error);
-            alert("Hubo un fallo al intentar borrar la ficha.");
+            console.error("Error en el traspaso de datos:", error);
+            alert("Hubo un fallo al intentar mover el historial.");
         }
     }
 }
@@ -1186,20 +1267,30 @@ async function forzarDesbloqueo() {
 
     if (confirm("Esta cita está cobrada. Si la desbloqueas para editarla, se eliminará el registro de pago de las estadísticas. ¿Deseas continuar?")) {
         try {
-            // 1. Borrar la venta vinculada para que los gráficos bajen
+            // 1. Buscamos la venta
             const venta = await db.ventas.where('citaId').equals(parseInt(idCita)).first();
+            
+            // 2. Si existe, intentamos borrarla. Si NO existe, avisamos (error de integridad)
             if (venta) {
                 await db.ventas.delete(venta.id);
+            } else {
+                console.warn("No se encontró una venta vinculada a esta cita, pero procederemos a desbloquear.");
             }
 
-            // 2. Cambiar estado en la agenda
+            // 3. SOLO si el paso anterior no dio error, actualizamos la agenda
             await db.agenda.update(parseInt(idCita), { cobrado: false });
 
-            // 3. Cerrar y refrescar todo
-            bootstrap.Modal.getInstance(document.getElementById('modalCita')).hide();
+            // 4. Refresco total de la interfaz (Añadimos el gráfico aquí también)
             if (calendar) calendar.refetchEvents();
             if (typeof cargarHistorialVentas === 'function') await cargarHistorialVentas();
             if (typeof listarClientas === 'function') await listarClientas();
+            
+            // 5. Cerrar modal al final de todo el proceso exitoso
+            const modalEl = document.getElementById('modalCita');
+            const modalInstance = bootstrap.Modal.getInstance(modalEl);
+            if (modalInstance) modalInstance.hide();
+
+            alert("Cita desbloqueada. Los registros de venta han sido eliminados.");
 
         } catch (error) {
             console.error("Error al desbloquear:", error);
@@ -1277,12 +1368,17 @@ async function importarBackup(event) {
         try {
             const contenido = JSON.parse(e.target.result);
             
-            // Validamos que el archivo tenga la estructura correcta
-            if (!contenido.tablas) {
-                throw new Error("El archivo no parece ser un backup válido.");
+            // --- 🛡️ ESCUDO DE INTEGRIDAD (Antes de borrar nada) ---
+            const tablas = contenido.tablas;
+            if (!tablas || !tablas.clientas || !tablas.servicios || !tablas.agenda || !tablas.ventas) {
+                throw new Error("El archivo de copia está incompleto o el formato no es válido.");
             }
 
-            // 1. Limpiamos las tablas actuales para evitar duplicados
+            // Opcional: Validar que no sean arrays vacíos si te preocupa, 
+            // aunque a veces un backup puede tener 0 ventas.
+            // -------------------------------------------------------
+
+            // 1. Si el archivo es válido, procedemos a limpiar
             await Promise.all([
                 db.clientas.clear(),
                 db.servicios.clear(),
@@ -1290,20 +1386,20 @@ async function importarBackup(event) {
                 db.ventas.clear()
             ]);
 
-            // 2. Insertamos los datos del archivo
+            // 2. Insertamos los datos asegurando que existen (fallback a array vacío si falla algo)
             await Promise.all([
-                db.clientas.bulkAdd(contenido.tablas.clientas),
-                db.servicios.bulkAdd(contenido.tablas.servicios),
-                db.agenda.bulkAdd(contenido.tablas.agenda),
-                db.ventas.bulkAdd(contenido.tablas.ventas)
+                db.clientas.bulkAdd(tablas.clientas || []),
+                db.servicios.bulkAdd(tablas.servicios || []),
+                db.agenda.bulkAdd(tablas.agenda || []),
+                db.ventas.bulkAdd(tablas.ventas || [])
             ]);
 
-            alert("¡Éxito! Datos restaurados correctamente. La página se recargará ahora.");
-            location.reload(); // Recargamos para que la agenda y listas se actualicen
+            alert("¡Éxito! Datos restaurados correctamente.");
+            location.reload(); 
 
         } catch (error) {
             console.error("Error al importar:", error);
-            alert("Error: El archivo está dañado o no es compatible.");
+            alert("⚠️ ERROR CRÍTICO: " + error.message + "\n\nNo se han realizado cambios en tus datos actuales.");
         }
     };
     reader.readAsText(archivo);
