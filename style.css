@@ -438,8 +438,8 @@ canvas {
     align-items: center;
     justify-content: center;
     background-color: #1a1a1a;
-    border: 1px solid #c5a059;
-    color: #c5a059;
+    border: 1px solid red;
+    color: red;
     border-radius: 50%;
     cursor: pointer;
     transition: all 0.3s ease;
