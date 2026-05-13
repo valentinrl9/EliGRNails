@@ -149,14 +149,27 @@ let calendar;
 let citaParaCobrar = null;
 
 // =========================================
-// 2. INICIALIZACIÓN AL CARGAR LA PÁGINA
+// 2. INICIALIZACIÓN AL CARGAR LA PÁGINA (Optimizado para Tablet)
 // =========================================
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // 1. PRIORIDAD MÁXIMA: Interfaz de trabajo
+    // Estas funciones son rápidas y necesarias para empezar a dar citas
     initCalendar();
     listarClientas();
     listarServicios();
     actualizarSelectores();
+
+    // 2. CARGA DIFERIDA: Historial y Gráficos
+    // Usamos un pequeño retraso de 800ms. 
+    // Esto permite que la tablet termine de dibujar el calendario antes de empezar con los cálculos.
+    setTimeout(async () => {
+        console.log("Cargando historial y estadísticas en segundo plano...");
+        if (typeof cargarHistorialVentas === 'function') {
+            await cargarHistorialVentas();
+        }
+    }, 800); 
 });
+
 
 function initCalendar() {
     const calendarEl = document.getElementById('calendario');
