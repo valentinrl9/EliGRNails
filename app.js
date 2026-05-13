@@ -773,81 +773,76 @@ async function revertirCobro(ventaId, citaId) {
 async function cargarHistorialVentas() {
     const ventas = await db.ventas.orderBy('fecha').reverse().toArray();
     
-    // CAMBIO CLAVE: Buscamos el acordeón o la tabla
     let contenedor = document.getElementById('acordeonVentas');
     const tablaOriginal = document.getElementById('tablaVentasBody');
     
-    // Si ya existe el acordeón, lo usamos como destino. 
-    // Si no, buscamos el contenedor de la tabla original.
     let destino;
     if (contenedor) {
         destino = contenedor.parentElement;
     } else if (tablaOriginal) {
         destino = tablaOriginal.closest('.table-responsive') || tablaOriginal.parentElement.parentElement;
     } else {
-        // Si no encuentra nada de nada, salimos para evitar errores
         return;
     }
 
     let totalAcumulado = 0;
 
-    // 1. Marcas de tiempo para vistas acumulativas
     const ahora = new Date();
     const hoyInicio = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate()).getTime();
-
     const lunes = new Date(ahora);
     lunes.setDate(ahora.getDate() - (ahora.getDay() === 0 ? 6 : ahora.getDay() - 1));
     lunes.setHours(0,0,0,0);
     const inicioSemana = lunes.getTime();
-
     const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1).getTime();
     const inicioAño = new Date(ahora.getFullYear(), 0, 1).getTime();
 
     const grupos = { hoy: [], semana: [], mes: [], año: [], resto: [] };
 
-    // 2. Procesar datos (Calculamos el total real una sola vez aquí)
     await Promise.all(ventas.map(async (v) => {
         const cli = await db.clientas.get(v.clienteId);
         const ser = await db.servicios.get(v.servicioId);
         
-        // El total general SOLO se suma una vez por cada venta real
         totalAcumulado += v.importe;
-        
         const fVenta = new Date(v.fecha).getTime();
         const item = { v, cli, ser };
 
-        // 3. Lógica ACUMULATIVA (Sin "else")
-        // Una misma venta puede entrar en varios grupos a la vez
-        if (fVenta >= hoyInicio) {
-            grupos.hoy.push(item);
-        }
-        if (fVenta >= inicioSemana) {
-            grupos.semana.push(item);
-        }
-        if (fVenta >= inicioMes) {
-            grupos.mes.push(item);
-        }
-        if (fVenta >= inicioAño) {
-            grupos.año.push(item);
-        }
-        if (fVenta < inicioAño) {
-            grupos.resto.push(item); // Solo lo que sea de años anteriores
-        }
+        if (fVenta >= hoyInicio) grupos.hoy.push(item);
+        if (fVenta >= inicioSemana) grupos.semana.push(item);
+        if (fVenta >= inicioMes) grupos.mes.push(item);
+        if (fVenta >= inicioAño) grupos.año.push(item);
+        if (fVenta < inicioAño) grupos.resto.push(item);
     }));
 
-    // 4. Función para generar las secciones
+    // --- FUNCIÓN MODIFICADA PARA LAS 3 COLUMNAS ---
     const crearSeccion = (titulo, id, datos, abierto = false) => {
-        const suma = datos.reduce((acc, item) => acc + item.v.importe, 0);
         if (datos.length === 0 && id !== 'hoy') return ''; 
+
+        // Calculamos los tres sacos de dinero
+        let sumaLoma = 0;
+        let sumaMio = 0;
+        
+        datos.forEach(item => {
+            if (item.cli && item.cli.nombre === "Salon Loma") {
+                sumaLoma += item.v.importe;
+            } else {
+                sumaMio += item.v.importe;
+            }
+        });
+        
+        const sumaTotal = sumaMio + sumaLoma;
 
         return `
             <div class="accordion-item bg-dark border-secondary mb-2">
                 <h2 class="accordion-header">
                     <button class="accordion-button ${abierto ? '' : 'collapsed'} bg-black text-white" 
                             type="button" data-bs-toggle="collapse" data-bs-target="#coll-${id}">
-                        <div class="d-flex justify-content-between w-100 me-3 align-items-center">
-                            <span>${titulo}</span>
-                            <span class="text-warning fw-bold">${suma.toFixed(2)}€</span>
+                        <div class="d-flex justify-content-between w-100 me-3 align-items-center" style="font-size: 0.85rem;">
+                            <span class="fw-bold">${titulo}</span>
+                            <div class="d-flex gap-3">
+                                <span style="color: #eec9c3;">Mío: ${sumaMio.toFixed(2)}€</span>
+                                <span style="color: #c5a059;">Loma: ${sumaLoma.toFixed(2)}€</span>
+                                <span class="text-warning fw-bold" style="border-left: 1px solid #444; padding-left: 10px;">Total: ${sumaTotal.toFixed(2)}€</span>
+                            </div>
                         </div>
                     </button>
                 </h2>
@@ -867,7 +862,9 @@ async function cargarHistorialVentas() {
                                 ${datos.map(item => `
                                     <tr>
                                         <td class="ps-3">${new Date(item.v.fecha).toLocaleDateString('es-ES', {day:'2-digit', month:'2-digit'})} ${new Date(item.v.fecha).toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'})}</td>
-                                        <td class="fw-bold">${item.cli ? item.cli.nombre : '---'}</td>
+                                        <td class="fw-bold" style="${item.cli && item.cli.nombre === 'Salon Loma' ? 'color: #c5a059;' : ''}">
+                                            ${item.cli ? item.cli.nombre : '---'}
+                                        </td>
                                         <td>${item.ser ? item.ser.nombre : '---'}</td>
                                         <td class="fw-bold">${item.v.importe.toFixed(2)}€</td>
                                         <td class="text-end pe-3">
@@ -884,23 +881,19 @@ async function cargarHistorialVentas() {
             </div>`;
     };
 
-    // 5. Renderizado final
     destino.innerHTML = `
         <div class="accordion accordion-flush" id="acordeonVentas">
             ${crearSeccion('HOY', 'hoy', grupos.hoy, true)}
-            ${crearSeccion('ESTA SEMANA (Acumulado)', 'sem', grupos.semana)}
-            ${crearSeccion('ESTE MES (Acumulado)', 'mes', grupos.mes)}
-            ${crearSeccion('ESTE AÑO (Acumulado)', 'anio', grupos.año)}
+            ${crearSeccion('ESTA SEMANA', 'sem', grupos.semana)}
+            ${crearSeccion('ESTE MES', 'mes', grupos.mes)}
+            ${crearSeccion('ESTE AÑO', 'anio', grupos.año)}
             ${crearSeccion('AÑOS ANTERIORES', 'resto', grupos.resto)}
         </div>
     `;
 
-    // 6. Actualizar el total general sin duplicados
     const elTotal = document.getElementById('totalCajaGeneral');
     if (elTotal) elTotal.innerText = `${totalAcumulado.toFixed(2)}€`;
 
-    // USAR UN PEQUEÑO TIMEOUT PARA LOS GRÁFICOS
-    // Esto permite que la tabla y el total se dibujen primero sin esperar al gráfico
     setTimeout(() => {
         if (typeof renderizarGraficos === 'function') {
             renderizarGraficos(ventas);
@@ -1832,16 +1825,20 @@ function enviarWhatsAppCumple(telefono, nombre, id) {
 }
 
 
-//GRAFICOS
-
-let chartSemana; // Variable global para el gráfico semanal
-let chartMes;    // Variable global para el gráfico mensual
+// GRAFICOS
+let chartSemana; 
+let chartMes;    
 Chart.register(ChartDataLabels); 
 
-function renderizarGraficos(ventas) {
+async function renderizarGraficos(ventas) {
     const canvasSem = document.getElementById('graficoSemanas');
     const canvasMes = document.getElementById('graficoMeses');
     if (!canvasSem || !canvasMes) return;
+
+    // 1. IDENTIFICAR A SALON LOMA POR SU ID REAL
+    const clientas = await db.clientas.toArray();
+    const objetoLoma = clientas.find(c => c.nombre === "Salon Loma");
+    const idLoma = objetoLoma ? objetoLoma.id : null;
 
     const ahora = new Date();
     const añoActual = ahora.getFullYear();
@@ -1855,124 +1852,108 @@ function renderizarGraficos(ventas) {
 
     const semanaActual = getWeekNumber(ahora);
     
-    // --- 1. INICIALIZAR ARRAYS ---
-    const ingresosSemanales = Array(semanaActual).fill(0);
-    const cantidadServiciosSemanales = Array(semanaActual).fill(0);
-    const etiquetasSemanas = Array.from({length: semanaActual}, (_, i) => `S${i + 1}`);
+    // Arrays de datos
+    const miosSem = Array(semanaActual).fill(0);
+    const lomaSem = Array(semanaActual).fill(0);
+    const totalSem = Array(semanaActual).fill(0);
+    const miosMes = Array(12).fill(0);
+    const lomaMes = Array(12).fill(0);
+    const totalMes = Array(12).fill(0);
 
-    const mesesNombres = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-    const ingresosMensuales = Array(12).fill(0);
-    const cantidadServiciosMensuales = Array(12).fill(0); // <-- Añadido para la mensual
-
-    // --- 2. PROCESAR DATOS ---
+    // 2. PROCESAR VENTAS USANDO EL ID
     ventas.forEach(v => {
         const fVenta = new Date(v.fecha);
-        
         if (fVenta.getFullYear() === añoActual) {
-            // Lógica Mensual
             const mesIdx = fVenta.getMonth();
-            ingresosMensuales[mesIdx] += v.importe;
-            cantidadServiciosMensuales[mesIdx] += 1; // Contamos servicios por mes
-
-            // Lógica Semanal
             const numSemana = getWeekNumber(fVenta);
-            if (numSemana >= 1 && numSemana <= semanaActual) {
-                ingresosSemanales[numSemana - 1] += v.importe;
-                cantidadServiciosSemanales[numSemana - 1] += 1; // Contamos servicios por semana
+            const importe = parseFloat(v.importe) || 0;
+            
+            // Comprobación infalible por ID
+            const esLoma = (v.clienteId === idLoma);
+
+            if (esLoma) {
+                lomaMes[mesIdx] += importe;
+                if (numSemana > 0 && numSemana <= semanaActual) lomaSem[numSemana - 1] += importe;
+            } else {
+                miosMes[mesIdx] += importe;
+                if (numSemana > 0 && numSemana <= semanaActual) miosSem[numSemana - 1] += importe;
             }
+            
+            totalMes[mesIdx] += importe;
+            if (numSemana > 0 && numSemana <= semanaActual) totalSem[numSemana - 1] += importe;
         }
     });
 
-    // --- 3. CONFIGURACIÓN COMÚN DE DATASETS DE SERVICIOS ---
-    const datasetServicios = (datos, ejeId) => ({
-        label: 'Servicios',
-        data: datos,
-        type: 'line',
-        yAxisID: ejeId,
-        borderColor: '#ffffff',
-        borderWidth: 2,
-        borderDash: [5, 5],
-        pointRadius: 3,
-        tension: 0.3,
-        fill: false,
-        datalabels: {
-            align: 'bottom',
-            anchor: 'start',
-            formatter: (v) => v > 0 ? v : '',
-            color: '#c5a059',
-            font: { size: 10, weight: 'bold' }
+    // 3. CONFIGURACIÓN DE DATASETS (Sincronizado con tus colores)
+    const configurarDatasets = (dMios, dLoma, dTotal) => [
+        {
+            label: 'Total',
+            data: dTotal,
+            borderColor: '#ffc107', 
+            borderWidth: 4,
+            fill: false,
+            //tension: 0.3,
+            pointRadius: 0, 
+            order: 3, // Al fondo
+            datalabels: { align: 'top', anchor: 'end', color: '#ffc107', offset: 10, formatter: v => v > 0 ? v + '€' : '' }
+        },
+        {
+            label: 'Mis Clientas',
+            data: dMios,
+            borderColor: '#eec9c3', 
+            borderWidth: 3,
+            fill: false,
+            //tension: 0.3,
+            pointRadius: 4,
+            pointBackgroundColor: '#eec9c3',
+            order: 1, // Al frente
+            datalabels: { 
+                align: 'bottom', 
+                anchor: 'start', 
+                color: '#eec9c3', 
+                formatter: (v, ctx) => (dLoma[ctx.dataIndex] > 0 && v > 0) ? v + '€' : '' 
+            }
+        },
+        {
+            label: 'Salon Loma',
+            data: dLoma,
+            borderColor: 'green', 
+            borderWidth: 2,
+            fill: false,
+            //tension: 0.3,
+            pointRadius: 4,
+            pointBackgroundColor: 'green',
+            order: 2, // En medio
+            datalabels: { align: 'top', anchor: 'center', color: 'green', formatter: v => v > 0 ? v + '€' : '' }
         }
-    });
+    ];
 
-    // --- 4. DIBUJAR GRÁFICO SEMANAL ---
+    const opciones = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { 
+            legend: { display: true, labels: { color: '#fff', boxWidth: 12, font: { size: 10 } } },
+            datalabels: { display: true, font: { weight: 'bold', size: 10 } }
+        },
+        scales: {
+            y: { beginAtZero: true, grid: { color: '#222' }, ticks: { color: '#fff', callback: v => v + '€' } },
+            x: { grid: { display: false }, ticks: { color: '#fff' } }
+        }
+    };
+
+    // 4. RENDERIZADO
     if (chartSemana) chartSemana.destroy();
     chartSemana = new Chart(canvasSem.getContext('2d'), {
         type: 'line',
-        data: {
-            labels: etiquetasSemanas, 
-            datasets: [
-                {
-                    label: 'Ingresos (€)',
-                    data: ingresosSemanales,
-                    yAxisID: 'y',
-                    borderColor: '#eec9c3',
-                    backgroundColor: 'rgba(236, 95, 156, 0.5)',
-                    borderWidth: 2,
-                    fill: true,
-                    datalabels: { align: 'top', anchor: 'end', formatter: (v) => v > 0 ? v + '€' : '', color: '#ffffff' }
-                },
-                datasetServicios(cantidadServiciosSemanales, 'y1')
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            layout: { padding: { top: 35, left: 10, right: 30, bottom: 10 } },
-            plugins: { legend: { display: false }, datalabels: { display: true } },
-            scales: {
-                y: { beginAtZero: true, grid: { color: '#222' }, ticks: { color: '#ffffff' } },
-                y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, ticks: { color: '#c5a059', stepSize: 1 } },
-                x: { grid: { display: false }, ticks: { color: '#ffffff' } }
-            }
-        }
+        data: { labels: Array.from({length: semanaActual}, (_, i) => `S${i + 1}`), datasets: configurarDatasets(miosSem, lomaSem, totalSem) },
+        options: opciones
     });
 
-    // --- 5. DIBUJAR GRÁFICO MENSUAL (Ahora también con Doble Eje) ---
     if (chartMes) chartMes.destroy();
     chartMes = new Chart(canvasMes.getContext('2d'), {
         type: 'line',
-        data: {
-            labels: mesesNombres,
-            datasets: [
-                {
-                    label: 'Ingresos (€)',
-                    data: ingresosMensuales,
-                    yAxisID: 'y',
-                    borderColor: '#eec9c3',
-                    backgroundColor: 'rgba(236, 95, 156, 0.5)',
-                    borderWidth: 2,
-                    fill: true,
-                    datalabels: { align: 'top', anchor: 'end', formatter: (v) => v > 0 ? v + '€' : '', color: '#ffffff' }
-                },
-                datasetServicios(cantidadServiciosMensuales, 'y1') // <-- SEGUNDA LÍNEA AÑADIDA
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            layout: { padding: { top: 35, left: 10, right: 30, bottom: 10 } }, // Padding ajustado para el eje derecho
-            plugins: { legend: { display: false }, datalabels: { display: true } },
-            scales: {
-                y: { beginAtZero: true, grid: { color: '#222' }, ticks: { color: '#ffffff' } },
-                y1: { 
-                    position: 'right', 
-                    beginAtZero: true, 
-                    grid: { drawOnChartArea: false }, 
-                    ticks: { color: '#c5a059', stepSize: 1 } // Eje para servicios mensuales
-                },
-                x: { grid: { display: false }, ticks: { color: '#ffffff' } }
-            }
-        }
+        data: { labels: ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"], datasets: configurarDatasets(miosMes, lomaMes, totalMes) },
+        options: opciones
     });
 }
 
