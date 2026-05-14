@@ -853,7 +853,7 @@ async function cargarHistorialVentas() {
                             <span class="fw-bold">${titulo}</span>
                             <div class="d-flex gap-3">
                                 <span style="color: #eec9c3;">Mío: ${sumaMio.toFixed(2)}€</span>
-                                <span style="color: #c5a059;">Loma: ${sumaLoma.toFixed(2)}€</span>
+                                <span style="color: #01a00c;">Loma: ${sumaLoma.toFixed(2)}€</span>
                                 <span class="text-warning fw-bold" style="border-left: 1px solid #444; padding-left: 10px;">Total: ${sumaTotal.toFixed(2)}€</span>
                             </div>
                         </div>
