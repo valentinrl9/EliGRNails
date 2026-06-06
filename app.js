@@ -189,7 +189,7 @@ function initCalendar() {
         allDaySlot: false,
         nowIndicator: true,
         contentHeight: 'auto',
-        slotMinTime: '10:00:00',
+        slotMinTime: '09:30:00',
         slotMaxTime: '21:30:00',
         slotDuration: '00:30:00',
         slotLabelInterval: "00:30",
@@ -615,44 +615,42 @@ async function confirmarCobro() {
     const importeFinal = parseFloat(importeInput);
     const metodo = document.getElementById('metodoPago').value;
 
-        if (isNaN(importeFinal) || importeFinal < 0) {
-            Swal.fire({
-                ...swalConfig,
-                icon: 'warning',
-                title: 'Importe no válido',
-                text: 'Por favor, introduce un número válido para el precio del servicio.',
-                confirmButtonText: 'Corregir'
-            });
-            return;
-        }
+    if (isNaN(importeFinal) || importeFinal < 0) {
+        Swal.fire({
+            ...swalConfig,
+            icon: 'warning',
+            title: 'Importe no válido',
+            text: 'Por favor, introduce un número válido para el precio del servicio.',
+            confirmButtonText: 'Corregir'
+        });
+        return;
+    }
 
     try {
         // =====================================================
         // 🛡️ PASO 0: ESCUDO DE SEGURIDAD (Validación de BD)
         // =====================================================
-        // Buscamos el estado REAL de la cita en la base de datos
         const citaRealEnBD = await db.agenda.get(parseInt(citaParaCobrar.id));
 
         if (!citaRealEnBD) {
-        Swal.fire({
-            ...swalConfig,
-            icon: 'error',
-            title: 'Cita no encontrada',
-            text: 'No se puede procesar el cobro porque esta cita parece haber sido eliminada de la agenda.',
-            confirmButtonText: 'Cerrar'
-        });
+            Swal.fire({
+                ...swalConfig,
+                icon: 'error',
+                title: 'Cita no encontrada',
+                text: 'No se puede procesar el cobro porque esta cita parece haber sido eliminada de la agenda.',
+                confirmButtonText: 'Cerrar'
+            });
             return;
         }
 
         if (citaRealEnBD.cobrado === true) {
-        Swal.fire({
-                    ...swalConfig,
-                    icon: 'warning',
-                    title: 'Cita ya cobrada',
-                    text: 'Esta cita ya figura como COBRADA en el sistema. No se puede generar un nuevo ingreso para el mismo servicio.',
-                    confirmButtonText: 'Entendido'
-                });
-            // Cerramos el modal para evitar más intentos
+            Swal.fire({
+                ...swalConfig,
+                icon: 'warning',
+                title: 'Cita ya cobrada',
+                text: 'Esta cita ya figura como COBRADA en el sistema. No se puede generar un nuevo ingreso para el mismo servicio.',
+                confirmButtonText: 'Entendido'
+            });
             const modalCobroEl = document.getElementById('modalCobro');
             const modalInstance = bootstrap.Modal.getInstance(modalCobroEl);
             if (modalInstance) modalInstance.hide();
@@ -660,12 +658,13 @@ async function confirmarCobro() {
         }
         // =====================================================
 
-        // 1. Guardamos la venta asegurando IDs numéricos
+        // 1. Guardamos la venta asegurando IDs numéricos 
+        // -> CAMBIO CLAVE: Usamos citaRealEnBD.fecha para mantener el día de la cita
         await db.ventas.add({
             citaId: parseInt(citaParaCobrar.id), 
             clienteId: parseInt(citaParaCobrar.clienteId),
             servicioId: parseInt(citaParaCobrar.servicioId),
-            fecha: new Date().toISOString(),
+            fecha: citaRealEnBD.fecha, // <-- Cambiado aquí para heredar el día de la agenda
             importe: importeFinal,
             metodoPago: metodo
         });
@@ -674,18 +673,14 @@ async function confirmarCobro() {
         await db.agenda.update(parseInt(citaParaCobrar.id), { cobrado: true });
         
         // 3. ACTUALIZACIÓN DE INTERFAZ (Una sola vez cada una)
-        
-        // Refrescar el Historial de Ventas/Estadísticas
         if (typeof cargarHistorialVentas === 'function') {
             await cargarHistorialVentas(); 
         }
 
-        // Refrescar la Lista de Clientas (Para que suban los puntos/fidelidad)
         if (typeof listarClientas === 'function') {
             await listarClientas();
         }
         
-        // Refrescar el Calendario
         if (typeof calendar !== 'undefined' && calendar) {
             calendar.refetchEvents();
         }
@@ -697,14 +692,14 @@ async function confirmarCobro() {
         
         // 5. Mensaje de éxito final
         Swal.fire({
-                    ...swalConfig,
-                    icon: 'success',
-                    title: '¡Operación Exitosa!',
-                    text: importeFinal === 0 
-                        ? "Sesión de regalo registrada correctamente." 
-                        : `Venta registrada por un importe de ${importeFinal}€`,
-                    confirmButtonText: 'Excelente'
-                });
+            ...swalConfig,
+            icon: 'success',
+            title: '¡Operación Exitosa!',
+            text: importeFinal === 0 
+                ? "Sesión de regalo registrada correctamente." 
+                : `Venta registrada por un importe de ${importeFinal}€`,
+            confirmButtonText: 'Excelente'
+        });
         
     } catch (error) {
         console.error("Error al procesar el cobro:", error);
@@ -717,7 +712,6 @@ async function confirmarCobro() {
         });
     }
 }
-
 
 async function revertirCobro(ventaId, citaId) {
     Swal.fire({
