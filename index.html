@@ -11,7 +11,7 @@
     <meta name="mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Eli-GR Nails">
     <link rel="shortcut icon" sizes="196x196" href="logo_salon.png">
-    <link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.11.0/main.min.css' rel='stylesheet' />
+    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -62,20 +62,44 @@
                     <button class="nav-link btn-nav" id="tab-servicios" data-bs-toggle="pill" data-bs-target="#content-servicios">Servicios</button>
                 </li>
                 <li class="nav-item">
-                    <button class="nav-link btn-nav" id="tab-ventas" data-bs-toggle="pill" data-bs-target="#content-ventas" onclick="cargarHistorialVentas()">Caja e Ingresos</button>
+                    <button class="nav-link btn-nav" id="tab-ventas" data-bs-toggle="pill" data-bs-target="#content-ventas">Caja e Ingresos</button>
                 </li>
             </ul>
         </div>
     </div>
-    <button onclick="exportarBackup()" class="btn btn-sm btn-outline-gold ms-auto shadow-sm" title="Copia de Seguridad">
+    <button type="button" id="btnExportarBackup" class="btn btn-sm btn-outline-gold ms-auto shadow-sm" title="Copia de Seguridad">
         <i class="fa-solid fa-cloud-arrow-down"></i>
     </button>
-    <input type="file" id="importFileNavbar" accept=".json" style="display: none;" onchange="importarBackup(event)">
+    <input type="file" id="importFileNavbar" accept=".json" style="display: none;">
 
-    <button onclick="document.getElementById('importFileNavbar').click()" class="btn btn-sm btn-outline-gold ms-2 shadow-sm" title="Restaurar Copia de Seguridad">
+    <button type="button" id="btnImportarBackup" class="btn btn-sm btn-outline-gold ms-2 shadow-sm" title="Restaurar Copia de Seguridad">
         <i class="fa-solid fa-cloud-arrow-up"></i>
     </button>
+    <button type="button" id="btnCambiarPin" class="btn btn-sm btn-outline-gold ms-2 shadow-sm" title="Cambiar PIN">
+        <i class="fa-solid fa-key"></i>
+    </button>
+    <button type="button" id="btnBloquearApp" class="btn btn-sm btn-outline-gold ms-2 shadow-sm" title="Bloquear app">
+        <i class="fa-solid fa-lock"></i>
+    </button>
 </nav>
+
+<div id="overlayBloqueo" style="display:none; position:fixed; inset:0; z-index:1040; background:rgba(0,0,0,0.92); align-items:center; justify-content:center;">
+    <div class="card border-gold shadow-lg p-4" style="max-width:360px; width:90%; background:#1a1a1a;">
+        <h4 id="tituloBloqueo" class="text-gold text-center mb-3">Introduce tu PIN</h4>
+        <p class="text-white-50 small text-center mb-3">Protege el acceso a los datos del salón</p>
+        <input type="password" id="inputPinAcceso" class="form-control bg-dark text-white border-gold mb-2 text-center" maxlength="6" inputmode="numeric" autocomplete="off" placeholder="PIN (4-6 dígitos)">
+        <div id="grupoPinConfirmacion" style="display:none;">
+            <input type="password" id="inputPinConfirmacion" class="form-control bg-dark text-white border-gold mb-2 text-center" maxlength="6" inputmode="numeric" autocomplete="off" placeholder="Repite el PIN">
+        </div>
+        <button type="button" id="btnConfirmarPin" class="btn btn-dark border-gold w-100 py-2 mt-2">Acceder</button>
+        <div class="text-center mt-3 pt-3 border-top border-secondary">
+            <p class="text-white-50 small mb-2">¿Primera vez en este dispositivo?</p>
+            <button type="button" id="btnRestaurarOverlay" class="btn btn-outline-gold btn-sm">
+                <i class="fa-solid fa-cloud-arrow-up me-1"></i> Restaurar copia de seguridad
+            </button>
+        </div>
+    </div>
+</div>
 
 <div class="container-fluid py-4">
     <div class="tab-content" id="pills-tabContent">
@@ -100,7 +124,24 @@
                     placeholder="🔍 Buscar clienta por nombre o teléfono..." 
                     onkeyup="listarClientas()">
             </div>
-            <div id="listaClientes" class="row g-3">
+            <div id="cabeceraClientas" class="clientas-cabecera mb-2" aria-label="Ordenar listado de clientas">
+                <button type="button" class="clientas-cabecera-btn active" data-sort="nombre" data-label="Nombre">
+                    Nombre <span class="clientas-sort-icon">▲</span>
+                </button>
+                <button type="button" class="clientas-cabecera-btn" data-sort="fechaNacimiento" data-label="F. Nacimiento">
+                    F. Nacimiento <span class="clientas-sort-icon"></span>
+                </button>
+                <button type="button" class="clientas-cabecera-btn" data-sort="telefono" data-label="Teléfono">
+                    Teléfono <span class="clientas-sort-icon"></span>
+                </button>
+                <button type="button" class="clientas-cabecera-btn" data-sort="visitas" data-label="Total Visitas">
+                    Total Visitas <span class="clientas-sort-icon"></span>
+                </button>
+                <button type="button" class="clientas-cabecera-btn" data-sort="fidelidad" data-label="Premio Fidelidad">
+                    Premio Fidelidad <span class="clientas-sort-icon"></span>
+                </button>
+            </div>
+            <div id="listaClientes" class="clientas-lista">
                 </div>
         </div>
 
@@ -369,7 +410,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
-<script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
 <script src="app.js"></script>
 
 </body>
