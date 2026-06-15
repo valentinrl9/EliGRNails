@@ -291,6 +291,7 @@ function configurarBotonesApp() {
     document.getElementById('btnRestaurarOverlay')?.addEventListener('click', dispararImportacionBackup);
     document.getElementById('importFileNavbar')?.addEventListener('change', importarBackup);
     configurarOrdenClientas();
+    document.getElementById('btnConectarGoogle')?.addEventListener('click', manejarAuthClick);
 }
 
 let ordenClientas = { campo: 'nombre', asc: true };
@@ -2465,7 +2466,52 @@ async function crearEventoGoogle(cita) {
 }
 
 
-// 2. Esta función configura todo lo de Google
+// Google Calendar — carga bajo demanda (solo al pulsar el botón)
+const GOOGLE_GSI_URL = 'https://accounts.google.com/gsi/client';
+const GOOGLE_GAPI_URL = 'https://apis.google.com/js/api.js';
+let googleCargaPromesa = null;
+
+function cargarScriptExterno(src) {
+    return new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) {
+            resolve();
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = true;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error(`No se pudo cargar ${src}`));
+        document.head.appendChild(script);
+    });
+}
+
+async function asegurarGoogleListo() {
+    if (googleCargaPromesa) return googleCargaPromesa;
+
+    googleCargaPromesa = (async () => {
+        await cargarScriptExterno(GOOGLE_GSI_URL);
+        await cargarScriptExterno(GOOGLE_GAPI_URL);
+
+        await new Promise((resolve, reject) => {
+            if (typeof gapi === 'undefined') {
+                reject(new Error('Google API no disponible'));
+                return;
+            }
+            gapi.load('client', resolve);
+        });
+
+        await gapi.client.init({ discoveryDocs: [DISCOVERY_DOC] });
+        gapiInited = true;
+
+        if (!gsiInited && typeof google !== 'undefined') {
+            inicializarGoogle();
+        }
+    })();
+
+    return googleCargaPromesa;
+}
+
 function inicializarGoogle() {
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
@@ -2481,6 +2527,7 @@ function inicializarGoogle() {
                 return;
             }
             if (tokenResponse && tokenResponse.access_token) {
+                gapi.client.setToken(tokenResponse);
                 console.log("✅ Acceso concedido a Google Calendar");
                 actualizarBotonGoogle(true);
             }
@@ -2545,44 +2592,55 @@ function estaGoogleConectado() {
         && gapi.client.getToken() !== null;
 }
 
-// Función auxiliar para no repetir código del botón
 function actualizarBotonGoogle(conectado) {
     const btn = document.getElementById('btnConectarGoogle');
     if (!btn) return;
 
     if (conectado) {
         btn.classList.add('connected');
-        // No añadimos texto, el CSS se encarga del color verde y el punto
+        btn.title = 'Google Calendar conectado (pulsa para desconectar)';
     } else {
         btn.classList.remove('connected');
+        btn.title = 'Conectar con Google Calendar (opcional)';
     }
 }
 
-// 3. Esta función lanza la ventana al pulsar el botón
-function manejarAuthClick() {
-    solicitarTokenGoogle(true);
-}
-
-// 4. Cargamos las librerías al abrir la web
-window.addEventListener('load', () => {
-    if (typeof google !== 'undefined') {
-        inicializarGoogle();
-    }
-
-    gapi.load('client', async () => {
-        try {
-            await gapi.client.init({
-                discoveryDocs: [DISCOVERY_DOC],
-            });
-            gapiInited = true;
-            console.log("🚀 Google Calendar API lista");
-        } catch (error) {
-            console.error("Error inicializando GAPI:", error);
+async function manejarAuthClick() {
+    if (estaGoogleConectado()) {
+        const { isConfirmed } = await Swal.fire({
+            ...swalConfig,
+            icon: 'question',
+            title: '¿Desconectar Google Calendar?',
+            text: 'Las citas seguirán en la app, pero no se sincronizarán con Google hasta que vuelvas a conectar.',
+            showCancelButton: true,
+            confirmButtonText: 'Sí, desconectar',
+            cancelButtonText: 'Cancelar'
+        });
+        if (isConfirmed) {
+            const token = gapi.client.getToken();
+            if (token?.access_token && google?.accounts?.oauth2?.revoke) {
+                google.accounts.oauth2.revoke(token.access_token, () => {});
+            }
+            gapi.client.setToken(null);
+            actualizarBotonGoogle(false);
         }
-    });
+        return;
+    }
 
-    document.getElementById('btnConectarGoogle')?.addEventListener('click', manejarAuthClick);
-});
+    try {
+        await asegurarGoogleListo();
+        solicitarTokenGoogle(true);
+    } catch (error) {
+        console.error('Error cargando Google:', error);
+        Swal.fire({
+            ...swalConfig,
+            icon: 'error',
+            title: 'Google Calendar no disponible',
+            text: 'Comprueba tu conexión a internet e inténtalo de nuevo.',
+            confirmButtonText: 'Entendido'
+        });
+    }
+}
 
 async function actualizarEventoGoogle(googleEventId, datos) {
     if (!gapi.client.calendar || !googleEventId) return;
