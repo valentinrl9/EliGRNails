@@ -263,6 +263,10 @@ async function descifrarBackup(contenido, password) {
 }
 
 function configurarRefrescoPestanas() {
+    document.getElementById('tab-inicio')?.addEventListener('shown.bs.tab', () => {
+        if (typeof cargarDashboard === 'function') cargarDashboard();
+    });
+
     document.getElementById('tab-agenda')?.addEventListener('shown.bs.tab', () => {
         if (calendar) {
             calendar.updateSize();
@@ -291,6 +295,7 @@ function configurarBotonesApp() {
     document.getElementById('btnRestaurarOverlay')?.addEventListener('click', dispararImportacionBackup);
     document.getElementById('importFileNavbar')?.addEventListener('change', importarBackup);
     configurarOrdenClientas();
+    configurarDashboardEventos();
     document.getElementById('btnConectarGoogle')?.addEventListener('click', manejarAuthClick);
 }
 
@@ -391,6 +396,600 @@ function parseFechaVenta(fecha) {
         }
     }
     return new Date(NaN);
+}
+
+function parseFechaVenta(fecha) {
+    if (fecha instanceof Date) return fecha;
+    if (typeof fecha === 'number') return new Date(fecha);
+    if (typeof fecha === 'string') {
+        const iso = new Date(fecha);
+        if (!isNaN(iso.getTime())) return iso;
+        const partes = fecha.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (partes) {
+            return new Date(parseInt(partes[3], 10), parseInt(partes[2], 10) - 1, parseInt(partes[1], 10));
+        }
+    }
+    return new Date(NaN);
+}
+
+// =========================================
+// DASHBOARD INICIO
+// =========================================
+let cargandoDashboard = false;
+let dashboardAlertasCache = [];
+
+function inicioDia(fecha = new Date()) {
+    return new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
+}
+
+function inicioSemana(fecha = new Date()) {
+    const lunes = new Date(fecha);
+    lunes.setDate(lunes.getDate() - (lunes.getDay() === 0 ? 6 : lunes.getDay() - 1));
+    lunes.setHours(0, 0, 0, 0);
+    return lunes;
+}
+
+function inicioMes(fecha = new Date()) {
+    return new Date(fecha.getFullYear(), fecha.getMonth(), 1);
+}
+
+function esPerfilEspecial(nombre) {
+    return nombre === 'Ex-Clienta' || nombre === 'Salon Loma';
+}
+
+function esMismoDia(a, b) {
+    return a.getFullYear() === b.getFullYear()
+        && a.getMonth() === b.getMonth()
+        && a.getDate() === b.getDate();
+}
+
+function cumpleEnProximosDias(fechaNacimiento, diasVentana = 7) {
+    if (!fechaNacimiento || !String(fechaNacimiento).includes('/')) return false;
+    const partes = String(fechaNacimiento).split('/');
+    const diaNac = parseInt(partes[0], 10);
+    const mesNac = parseInt(partes[1], 10);
+    if (isNaN(diaNac) || isNaN(mesNac)) return false;
+
+    const hoy = inicioDia();
+    for (let i = 0; i <= diasVentana; i++) {
+        const d = new Date(hoy);
+        d.setDate(d.getDate() + i);
+        if (d.getDate() === diaNac && d.getMonth() + 1 === mesNac) return true;
+    }
+    return false;
+}
+
+function esCumpleHoy(fechaNacimiento) {
+    if (!fechaNacimiento || !String(fechaNacimiento).includes('/')) return false;
+    const partes = String(fechaNacimiento).split('/');
+    const hoy = new Date();
+    return parseInt(partes[0], 10) === hoy.getDate()
+        && parseInt(partes[1], 10) === hoy.getMonth() + 1;
+}
+
+function pctCambio(actual, anterior) {
+    if (anterior === 0) return actual > 0 ? 100 : 0;
+    return ((actual - anterior) / anterior) * 100;
+}
+
+function fmtPct(n) {
+    const signo = n > 0 ? '+' : '';
+    return `${signo}${n.toFixed(0)}%`;
+}
+
+function fmtEuros(n) {
+    return `${n.toFixed(2)}€`;
+}
+
+function irATab(tabId) {
+    const tab = document.getElementById(tabId);
+    if (tab) bootstrap.Tab.getOrCreateInstance(tab).show();
+}
+
+function ejecutarAccionDashboard(accion, id) {
+    switch (accion) {
+        case 'clienta':
+            if (id) abrirDashboardClienta(id);
+            break;
+        case 'agenda':
+            irATab('tab-agenda');
+            break;
+        case 'clientes':
+            irATab('tab-clientes');
+            break;
+        case 'ventas':
+            irATab('tab-ventas');
+            break;
+        case 'servicios':
+            irATab('tab-servicios');
+            break;
+        default:
+            break;
+    }
+}
+
+function configurarDashboardEventos() {
+    const wrap = document.getElementById('content-inicio');
+    if (!wrap || wrap.dataset.eventsBound) return;
+    wrap.dataset.eventsBound = '1';
+    wrap.addEventListener('click', (e) => {
+        const item = e.target.closest('[data-accion]');
+        if (!item) return;
+        if (item.classList.contains('dashboard-seccion-card') && e.target.closest('[data-accion-inner]')) return;
+        ejecutarAccionDashboard(item.dataset.accion, item.dataset.id || '');
+    });
+    wrap.addEventListener('keydown', (e) => {
+        const card = e.target.closest('.dashboard-seccion-card[data-accion]');
+        if (!card || (e.key !== 'Enter' && e.key !== ' ')) return;
+        e.preventDefault();
+        ejecutarAccionDashboard(card.dataset.accion, '');
+    });
+}
+
+function renderKpiMini(valor, label) {
+    return `<div class="dashboard-kpi-mini"><div class="kpi-val">${valor}</div><div class="kpi-lbl">${label}</div></div>`;
+}
+
+function renderChip(valor, label, extraClass = '') {
+    return `<div class="dashboard-chip ${extraClass}"><span class="chip-val">${valor}</span><span class="chip-lbl">${label}</span></div>`;
+}
+
+function renderSeccionStat(valor, label) {
+    return `<div class="seccion-stat"><span class="stat-val">${valor}</span><span class="stat-lbl">${label}</span></div>`;
+}
+
+async function calcularDatosDashboard() {
+    const ahora = new Date();
+    const hoy0 = inicioDia(ahora);
+    const manana0 = new Date(hoy0);
+    manana0.setDate(manana0.getDate() + 1);
+    const pasadoManana0 = new Date(hoy0);
+    pasadoManana0.setDate(pasadoManana0.getDate() + 2);
+
+    const iniSem = inicioSemana(ahora);
+    const iniSemPas = new Date(iniSem);
+    iniSemPas.setDate(iniSemPas.getDate() - 7);
+    const diasTranscurridosSem = Math.floor((hoy0 - iniSem) / 86400000) + 1;
+    const finSemPasComp = new Date(iniSemPas);
+    finSemPasComp.setDate(finSemPasComp.getDate() + diasTranscurridosSem - 1);
+    finSemPasComp.setHours(23, 59, 59, 999);
+
+    const iniMes = inicioMes(ahora);
+    const iniMesPas = inicioMes(new Date(ahora.getFullYear(), ahora.getMonth() - 1, 1));
+    const finMesPasComp = new Date(iniMesPas);
+    const ultimoDiaMesPas = new Date(ahora.getFullYear(), ahora.getMonth(), 0).getDate();
+    finMesPasComp.setDate(Math.min(ahora.getDate(), ultimoDiaMesPas));
+    finMesPasComp.setHours(23, 59, 59, 999);
+
+    const [ventas, clientas, agenda, servicios] = await Promise.all([
+        db.ventas.toArray(),
+        db.clientas.toArray(),
+        db.agenda.toArray(),
+        db.servicios.toArray()
+    ]);
+
+    const servicioMap = Object.fromEntries(servicios.map(s => [s.id, s]));
+    const clientaMap = Object.fromEntries(clientas.map(c => [c.id, c]));
+    const idLoma = clientas.find(c => c.nombre === 'Salon Loma')?.id;
+
+    let ingresosHoy = 0, ingresosSem = 0, ingresosSemPas = 0;
+    let ingresosMes = 0, ingresosMesPas = 0;
+    let ingresosMioMes = 0, ingresosLomaMes = 0;
+    const ingresosPorDia7 = Array(7).fill(0);
+    const conteoServiciosMes = {};
+    const ingresosServiciosMes = {};
+
+    const ultimaVisitaPorCliente = {};
+    const primeraVisitaPorCliente = {};
+    const totalGastadoPorCliente = {};
+    const visitasPagadasPorCliente = {};
+
+    ventas.forEach(v => {
+        const f = parseFechaVenta(v.fecha);
+        if (isNaN(f.getTime())) return;
+        const importe = parseFloat(v.importe) || 0;
+        const ts = f.getTime();
+        const cid = parseInt(v.clienteId);
+
+        if (importe > 0) {
+            if (ts >= hoy0.getTime() && ts < manana0.getTime()) ingresosHoy += importe;
+            if (ts >= iniSem.getTime() && ts <= ahora.getTime()) ingresosSem += importe;
+            if (ts >= iniSemPas.getTime() && ts <= finSemPasComp.getTime()) ingresosSemPas += importe;
+            if (ts >= iniMes.getTime() && ts <= ahora.getTime()) {
+                ingresosMes += importe;
+                if (cid === idLoma) ingresosLomaMes += importe;
+                else ingresosMioMes += importe;
+            }
+            if (ts >= iniMesPas.getTime() && ts <= finMesPasComp.getTime()) ingresosMesPas += importe;
+
+            const diasAtras = Math.floor((hoy0 - inicioDia(f)) / 86400000);
+            if (diasAtras >= 0 && diasAtras < 7) ingresosPorDia7[6 - diasAtras] += importe;
+
+            if (!ultimaVisitaPorCliente[cid] || ts > ultimaVisitaPorCliente[cid]) ultimaVisitaPorCliente[cid] = ts;
+            if (!primeraVisitaPorCliente[cid] || ts < primeraVisitaPorCliente[cid]) primeraVisitaPorCliente[cid] = ts;
+            totalGastadoPorCliente[cid] = (totalGastadoPorCliente[cid] || 0) + importe;
+            visitasPagadasPorCliente[cid] = (visitasPagadasPorCliente[cid] || 0) + 1;
+
+            if (ts >= iniMes.getTime()) {
+                const sid = parseInt(v.servicioId);
+                const nom = servicioMap[sid]?.nombre || 'Otro';
+                conteoServiciosMes[nom] = (conteoServiciosMes[nom] || 0) + 1;
+                ingresosServiciosMes[nom] = (ingresosServiciosMes[nom] || 0) + importe;
+            }
+        }
+    });
+
+    const citasHoy = agenda.filter(c => esMismoDia(parseFechaVenta(c.fecha), ahora)).length;
+    const citasManana = agenda.filter(c => esMismoDia(parseFechaVenta(c.fecha), manana0)).length;
+    const citasPasadoManana = agenda.filter(c => esMismoDia(parseFechaVenta(c.fecha), pasadoManana0)).length;
+
+    const citasSinCobrar = agenda.filter(c => {
+        const f = parseFechaVenta(c.fecha);
+        return !isNaN(f.getTime()) && f < ahora && c.cobrado !== true && c.cobrado !== 'true';
+    });
+
+    const clientasActivas = clientas.filter(c => !esPerfilEspecial(c.nombre) && visitasPagadasPorCliente[c.id] > 0);
+
+    let regalosPendientes = 0;
+    const clientasRegalo = [];
+    clientasActivas.forEach(c => {
+        const pagadas = visitasPagadasPorCliente[c.id] || 0;
+        if (pagadas > 0 && pagadas % 10 === 0) {
+            regalosPendientes++;
+            clientasRegalo.push(c);
+        }
+    });
+
+    const cumpleSemana = clientas.filter(c => !esPerfilEspecial(c.nombre) && cumpleEnProximosDias(c.fechaNacimiento, 7));
+    const cumpleHoy = clientas.filter(c => !esPerfilEspecial(c.nombre) && esCumpleHoy(c.fechaNacimiento));
+
+    const UMBRAL_INACTIVA = 90;
+    const UMBRAL_RIESGO = 60;
+    const ms90 = UMBRAL_INACTIVA * 86400000;
+    const ms60 = UMBRAL_RIESGO * 86400000;
+    const inactivas90 = [];
+    const inactivas60 = [];
+
+    clientasActivas.forEach(c => {
+        const ultima = ultimaVisitaPorCliente[c.id];
+        if (!ultima) return;
+        const diff = ahora.getTime() - ultima;
+        if (diff > ms90) inactivas90.push(c);
+        else if (diff > ms60) inactivas60.push(c);
+    });
+
+    let nuevasMes = 0;
+    clientasActivas.forEach(c => {
+        const primera = primeraVisitaPorCliente[c.id];
+        if (primera && primera >= iniMes.getTime()) nuevasMes++;
+    });
+
+    const visitasPagadasMes = ventas.filter(v => {
+        const f = parseFechaVenta(v.fecha);
+        return !isNaN(f.getTime()) && f >= iniMes && parseFloat(v.importe) > 0;
+    }).length;
+    const ticketMedio = visitasPagadasMes > 0 ? ingresosMes / visitasPagadasMes : 0;
+
+    const diasMes = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0).getDate();
+    const proyeccionMes = ahora.getDate() > 0 ? (ingresosMes / ahora.getDate()) * diasMes : 0;
+
+    const pctMes = pctCambio(ingresosMes, ingresosMesPas);
+    const pctSem = pctCambio(ingresosSem, ingresosSemPas);
+
+    const topServicios = Object.entries(conteoServiciosMes)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3);
+    const estrellaServicio = Object.entries(ingresosServiciosMes)
+        .sort((a, b) => b[1] - a[1])[0];
+
+    const topVip = clientasActivas
+        .map(c => ({ c, total: totalGastadoPorCliente[c.id] || 0, visitas: visitasPagadasPorCliente[c.id] || 0 }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 5);
+
+    const alertas = [];
+
+    citasSinCobrar.forEach(c => {
+        const cli = clientaMap[c.clienteId];
+        alertas.push({
+            nivel: 'urgente',
+            icono: 'fa-cash-register',
+            titulo: 'Cita sin cobrar',
+            texto: `${cli?.nombre || 'Clienta'} — ${parseFechaVenta(c.fecha).toLocaleDateString('es-ES')}`,
+            accion: 'agenda'
+        });
+    });
+
+    clientasRegalo.forEach(c => {
+        alertas.push({
+            nivel: 'urgente',
+            icono: 'fa-gift',
+            titulo: 'Regalo de fidelidad listo',
+            texto: `${c.nombre} ha completado 10 sesiones pagadas`,
+            accion: 'clienta',
+            id: c.id
+        });
+    });
+
+    cumpleHoy.forEach(c => {
+        alertas.push({
+            nivel: 'info',
+            icono: 'fa-cake-candles',
+            titulo: '¡Cumpleaños hoy!',
+            texto: c.nombre,
+            accion: 'clienta',
+            id: c.id
+        });
+    });
+
+    if (inactivas90.length > 0) {
+        alertas.push({
+            nivel: 'importante',
+            icono: 'fa-user-clock',
+            titulo: `${inactivas90.length} clienta(s) inactiva(s)`,
+            texto: `Sin visita en más de ${UMBRAL_INACTIVA} días — riesgo de perder cartera`,
+            accion: 'clientes'
+        });
+    }
+
+    if (pctSem <= -15 && ingresosSemPas > 0) {
+        alertas.push({
+            nivel: 'importante',
+            icono: 'fa-chart-line',
+            titulo: 'Ingresos semana en bajada',
+            texto: `${fmtPct(pctSem)} respecto a la semana pasada (mismo periodo)`,
+            accion: 'ventas'
+        });
+    }
+
+    if (pctMes <= -15 && ingresosMesPas > 0) {
+        alertas.push({
+            nivel: 'importante',
+            icono: 'fa-arrow-trend-down',
+            titulo: 'Ingresos mes en bajada',
+            texto: `${fmtPct(pctMes)} vs el mismo periodo del mes anterior`,
+            accion: 'ventas'
+        });
+    }
+
+    if (cumpleSemana.length > 0 && cumpleHoy.length === 0) {
+        alertas.push({
+            nivel: 'info',
+            icono: 'fa-cake-candles',
+            titulo: `${cumpleSemana.length} cumpleaños esta semana`,
+            texto: cumpleSemana.slice(0, 3).map(c => c.nombre).join(', ') + (cumpleSemana.length > 3 ? '…' : ''),
+            accion: 'clientes'
+        });
+    }
+
+    if (citasManana < 3) {
+        alertas.push({
+            nivel: 'sugerencia',
+            icono: 'fa-calendar-plus',
+            titulo: 'Mañana hay poca carga',
+            texto: `Solo ${citasManana} cita(s) — buen momento para contactar clientas inactivas`,
+            accion: 'agenda'
+        });
+    }
+
+    if (pctMes >= 10 && ingresosMesPas > 0) {
+        alertas.push({
+            nivel: 'sugerencia',
+            icono: 'fa-trophy',
+            titulo: '¡Buen mes!',
+            texto: `Ingresos ${fmtPct(pctMes)} por encima del mes pasado (mismo periodo)`,
+            accion: 'ventas'
+        });
+    }
+
+    inactivas60.filter(c => (totalGastadoPorCliente[c.id] || 0) >= 100).slice(0, 3).forEach(c => {
+        alertas.push({
+            nivel: 'sugerencia',
+            icono: 'fa-phone',
+            titulo: 'Reactivar clienta VIP',
+            texto: `${c.nombre} — ${fmtEuros(totalGastadoPorCliente[c.id])} históricos, sin visita reciente`,
+            accion: 'clienta',
+            id: c.id
+        });
+    });
+
+    if (topVip[0]) {
+        alertas.push({
+            nivel: 'sugerencia',
+            icono: 'fa-crown',
+            titulo: 'Clienta top del salón',
+            texto: `${topVip[0].c.nombre} — ${fmtEuros(topVip[0].total)} en ${topVip[0].visitas} visitas`,
+            accion: 'clienta',
+            id: topVip[0].c.id
+        });
+    }
+
+    const ordenNivel = { urgente: 0, importante: 1, info: 2, sugerencia: 3 };
+    alertas.sort((a, b) => ordenNivel[a.nivel] - ordenNivel[b.nivel]);
+
+    const alertasPrioritarias = alertas.filter(a => a.nivel === 'urgente' || a.nivel === 'importante');
+
+    return {
+        ingresosHoy, ingresosMes, pctMes, ingresosSem, pctSem,
+        citasHoy, citasManana, citasPasadoManana,
+        citasSinCobrar: citasSinCobrar.length,
+        alertas, alertasPrioritarias,
+        ticketMedio, proyeccionMes, ingresosMioMes, ingresosLomaMes,
+        regalosPendientes, cumpleSemana: cumpleSemana.length,
+        clientasActivas: clientasActivas.length, nuevasMes,
+        inactivas90: inactivas90.length, inactivas60: inactivas60.length,
+        topServicios, estrellaServicio, topVip, ingresosPorDia7
+    };
+}
+
+function renderAlertaItem(a) {
+    return `
+        <div class="dashboard-alert-item nivel-${a.nivel}" data-accion="${a.accion}" ${a.id ? `data-id="${a.id}"` : ''}>
+            <div class="alert-icon"><i class="fa-solid ${a.icono}"></i></div>
+            <div>
+                <div class="alert-titulo">${escaparHTML(a.titulo)}</div>
+                <div class="alert-texto">${escaparHTML(a.texto)}</div>
+            </div>
+        </div>
+    `;
+}
+
+function renderDashboard(d) {
+    const pctClass = d.pctMes >= 0 ? 'text-up' : 'text-down';
+    const alertasUrgentes = d.alertasPrioritarias.length;
+
+    document.getElementById('dashboardHero').innerHTML = `
+        <div class="dashboard-hero-card dashboard-hero-card--primary">
+            <div class="hero-icon"><i class="fa-solid fa-euro-sign"></i></div>
+            <div class="hero-valor">${fmtEuros(d.ingresosHoy)}</div>
+            <div class="hero-label">Ingresos hoy</div>
+        </div>
+        <div class="dashboard-hero-card">
+            <div class="hero-icon"><i class="fa-solid fa-chart-line"></i></div>
+            <div class="hero-valor">${fmtEuros(d.ingresosMes)}</div>
+            <div class="hero-label">Ingresos mes</div>
+            <div class="hero-sub ${pctClass}">${fmtPct(d.pctMes)} vs mes ant.</div>
+        </div>
+        <div class="dashboard-hero-card">
+            <div class="hero-icon"><i class="fa-solid fa-calendar-check"></i></div>
+            <div class="hero-valor">${d.citasHoy}</div>
+            <div class="hero-label">Citas hoy</div>
+            <div class="hero-sub text-muted">Mañana: ${d.citasManana}</div>
+        </div>
+    `;
+
+    document.getElementById('dashboardChips').innerHTML = `
+        ${renderChip(fmtEuros(d.ingresosSem), 'Semana')}
+        ${renderChip(fmtPct(d.pctSem), 'Vs sem.', d.pctSem >= 0 ? 'chip-up' : 'chip-down')}
+        ${renderChip(fmtEuros(d.ticketMedio), 'Ticket')}
+        ${renderChip(fmtEuros(d.proyeccionMes), 'Proyección')}
+        ${renderChip(d.citasSinCobrar, 'Sin cobrar', d.citasSinCobrar > 0 ? 'chip-warn' : '')}
+        ${renderChip(alertasUrgentes, 'Alertas', alertasUrgentes > 0 ? 'chip-danger' : '')}
+        ${renderChip(d.clientasActivas, 'Activas', '')}
+        ${renderChip(d.regalosPendientes, 'Regalos', d.regalosPendientes > 0 ? 'chip-ok' : '')}
+    `;
+
+    const sugerencias = d.alertas.filter(a => a.nivel === 'sugerencia');
+    const alertasNoSugerencia = d.alertas.filter(a => a.nivel !== 'sugerencia');
+    const visiblesAlertas = alertasNoSugerencia.slice(0, 5);
+
+    const badgeAlertas = document.getElementById('dashboardAlertasBadge');
+    const badgeSugerencias = document.getElementById('dashboardSugerenciasBadge');
+    if (badgeAlertas) badgeAlertas.textContent = alertasNoSugerencia.length;
+    if (badgeSugerencias) badgeSugerencias.textContent = sugerencias.length;
+
+    let alertasHtml = '';
+    if (alertasNoSugerencia.length === 0) {
+        alertasHtml = '<p class="dashboard-empty"><i class="fa-solid fa-circle-check"></i>Todo en orden — no hay alertas pendientes</p>';
+    } else {
+        alertasHtml = `<div class="dashboard-alertas-list dashboard-alertas-list-doble">${visiblesAlertas.map(renderAlertaItem).join('')}</div>`;
+        if (alertasNoSugerencia.length > 5) {
+            alertasHtml += `<button type="button" class="btn btn-sm btn-outline-gold w-100 mt-3" onclick="mostrarTodasAlertasDashboard('alertas')">
+                Ver todas (${alertasNoSugerencia.length})
+            </button>`;
+        }
+    }
+
+    let sugerenciasHtml = '';
+    if (sugerencias.length === 0) {
+        sugerenciasHtml = '<p class="dashboard-empty dashboard-empty--muted">Sin sugerencias por ahora</p>';
+    } else {
+        sugerenciasHtml = `<div class="dashboard-alertas-list dashboard-alertas-list-doble">${sugerencias.map(renderAlertaItem).join('')}</div>`;
+    }
+
+    document.getElementById('dashboardAlertas').innerHTML = alertasHtml;
+    document.getElementById('dashboardSugerencias').innerHTML = sugerenciasHtml;
+
+    dashboardAlertasCache = d.alertas;
+
+    document.getElementById('dashboardAcordeonCaja').innerHTML = `
+        <div data-accion-inner="1">
+            <div class="seccion-principal">${fmtEuros(d.ingresosSem)}</div>
+            <div class="seccion-principal-lbl">Esta semana</div>
+            <div class="seccion-stats">
+                ${renderSeccionStat(fmtEuros(d.ingresosMioMes), 'Mío')}
+                ${renderSeccionStat(fmtEuros(d.ingresosLomaMes), 'Loma')}
+                ${renderSeccionStat(fmtEuros(d.ticketMedio), 'Ticket')}
+            </div>
+        </div>
+        <span class="seccion-link">Ver caja <i class="fa-solid fa-arrow-right"></i></span>
+    `;
+
+    document.getElementById('dashboardAcordeonAgenda').innerHTML = `
+        <div data-accion-inner="1">
+            <div class="seccion-principal">${d.citasManana}</div>
+            <div class="seccion-principal-lbl">Citas mañana</div>
+            <div class="seccion-stats">
+                ${renderSeccionStat(d.citasSinCobrar, 'Sin cobrar')}
+                ${renderSeccionStat(d.citasPasadoManana, 'Pasado')}
+                ${renderSeccionStat(d.citasHoy, 'Hoy')}
+            </div>
+        </div>
+        <span class="seccion-link">Ver agenda <i class="fa-solid fa-arrow-right"></i></span>
+    `;
+
+    document.getElementById('dashboardAcordeonClientas').innerHTML = `
+        <div data-accion-inner="1">
+            <div class="seccion-principal">${d.clientasActivas}</div>
+            <div class="seccion-principal-lbl">Clientas activas</div>
+            <div class="seccion-stats">
+                ${renderSeccionStat(d.nuevasMes, 'Nuevas')}
+                ${renderSeccionStat(d.regalosPendientes, 'Regalos')}
+                ${renderSeccionStat(d.cumpleSemana, 'Cumples')}
+            </div>
+        </div>
+        <span class="seccion-link">Ver clientas <i class="fa-solid fa-arrow-right"></i></span>
+    `;
+
+    const estrellaNom = d.estrellaServicio ? escaparHTML(d.estrellaServicio[0]) : '—';
+
+    document.getElementById('dashboardAcordeonServicios').innerHTML = `
+        <div data-accion-inner="1">
+            <div class="seccion-principal seccion-principal--sm">${estrellaNom}</div>
+            <div class="seccion-principal-lbl">Estrella del mes</div>
+            <div class="seccion-stats">
+                ${renderSeccionStat(d.topServicios[0]?.[1] || 0, 'Top ventas')}
+                ${renderSeccionStat(d.topServicios[1] ? escaparHTML(d.topServicios[1][0]).slice(0, 8) : '—', '2º servicio')}
+                ${renderSeccionStat(d.estrellaServicio ? fmtEuros(d.estrellaServicio[1]) : '—', 'Ingresos')}
+            </div>
+        </div>
+        <span class="seccion-link">Ver servicios <i class="fa-solid fa-arrow-right"></i></span>
+    `;
+}
+
+function mostrarTodasAlertasDashboard(tipo) {
+    const lista = tipo === 'alertas'
+        ? dashboardAlertasCache.filter(a => a.nivel !== 'sugerencia')
+        : dashboardAlertasCache;
+    if (!lista.length) return;
+    Swal.fire({
+        ...swalConfig,
+        title: tipo === 'alertas' ? 'Todas las alertas' : 'Todas las alertas y sugerencias',
+        html: `<div class="dashboard-alertas-list dashboard-alertas-list-modal">${lista.map(renderAlertaItem).join('')}</div>`,
+        width: 600,
+        confirmButtonText: 'Cerrar',
+        didOpen: () => {
+            document.querySelector('.swal2-html-container')?.addEventListener('click', (e) => {
+                const item = e.target.closest('[data-accion]');
+                if (!item) return;
+                Swal.close();
+                ejecutarAccionDashboard(item.dataset.accion, item.dataset.id || '');
+            });
+        }
+    });
+}
+
+async function cargarDashboard() {
+    if (cargandoDashboard) return;
+    cargandoDashboard = true;
+    try {
+        const datos = await calcularDatosDashboard();
+        renderDashboard(datos);
+    } catch (err) {
+        console.error('Error cargando dashboard:', err);
+    } finally {
+        cargandoDashboard = false;
+    }
 }
 
 // Función para comprobar si hoy es el cumpleaños de alguna clienta
@@ -505,6 +1104,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     listarClientas();
     listarServicios();
     actualizarSelectores();
+
+    cargarDashboard();
 
     // 2. CARGA DIFERIDA: Historial y Gráficos
     setTimeout(async () => {
@@ -809,6 +1410,8 @@ async function agendarCita() {
 
         // --- FINALIZACIÓN ---
         if (typeof calendar !== 'undefined') calendar.refetchEvents();
+
+        if (typeof cargarDashboard === 'function') cargarDashboard();
         
         const modalInstance = bootstrap.Modal.getInstance(modalEl);
         if (modalInstance) modalInstance.hide();
@@ -847,6 +1450,8 @@ async function eliminarCita() {
                 
                 await db.agenda.delete(parseInt(id));
                 calendar.refetchEvents();
+
+                if (typeof cargarDashboard === 'function') cargarDashboard();
                 
                 // Cerramos el modal sin esperar a Google
                 const modalInstance = bootstrap.Modal.getInstance(document.getElementById('modalCita'));
@@ -1016,6 +1621,8 @@ async function confirmarCobro() {
         if (typeof calendar !== 'undefined' && calendar) {
             calendar.refetchEvents();
         }
+
+        if (typeof cargarDashboard === 'function') cargarDashboard();
         
         // 4. Cerrar el modal
         const modalCobroEl = document.getElementById('modalCobro');
@@ -1079,6 +1686,8 @@ async function revertirCobro(ventaId, citaId) {
                 }
 
                 if (typeof calendar !== 'undefined') calendar.refetchEvents();
+
+                if (typeof cargarDashboard === 'function') cargarDashboard();
 
                 Swal.fire({
                     ...swalConfig,
@@ -1300,6 +1909,7 @@ async function persistirClienta(idEdicion, datos, modalEl) {
 
     await listarClientas();
     if (typeof actualizarSelectores === "function") actualizarSelectores();
+    if (typeof cargarDashboard === 'function') cargarDashboard();
 
     const modalInstance = bootstrap.Modal.getInstance(modalEl);
     if (modalInstance) modalInstance.hide();

@@ -51,7 +51,10 @@
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="nav nav-pills ms-auto" id="pills-tab" role="tablist">
                 <li class="nav-item">
-                    <button class="nav-link btn-nav active" id="tab-agenda" data-bs-toggle="pill" data-bs-target="#content-agenda">Agenda</button>
+                    <button class="nav-link btn-nav active" id="tab-inicio" data-bs-toggle="pill" data-bs-target="#content-inicio">Inicio</button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link btn-nav" id="tab-agenda" data-bs-toggle="pill" data-bs-target="#content-agenda">Agenda</button>
                 </li>
                 <li class="nav-item">
                     <button class="nav-link btn-nav" id="tab-clientes" data-bs-toggle="pill" data-bs-target="#content-clientes">Clientas</button>
@@ -101,8 +104,71 @@
 
 <div class="container-fluid py-4">
     <div class="tab-content" id="pills-tabContent">
+
+        <div class="tab-pane fade show active" id="content-inicio">
+            <div class="dashboard-wrap">
+                <button type="button" class="btn btn-sm btn-dashboard-refresh btn-dashboard-refresh--float" onclick="cargarDashboard()" title="Actualizar">
+                    <i class="fa-solid fa-rotate"></i>
+                </button>
+
+                <div id="dashboardHero" class="dashboard-hero-row"></div>
+                <div id="dashboardChips" class="dashboard-chips mb-4"></div>
+
+                <div class="dashboard-secciones-grid mb-4">
+                    <div class="dashboard-seccion-card" data-accion="ventas" role="button" tabindex="0">
+                        <div class="seccion-head">
+                            <span class="seccion-icon"><i class="fa-solid fa-coins"></i></span>
+                            <span class="seccion-title">Caja</span>
+                        </div>
+                        <div id="dashboardAcordeonCaja"></div>
+                    </div>
+                    <div class="dashboard-seccion-card" data-accion="agenda" role="button" tabindex="0">
+                        <div class="seccion-head">
+                            <span class="seccion-icon"><i class="fa-solid fa-calendar-day"></i></span>
+                            <span class="seccion-title">Agenda</span>
+                        </div>
+                        <div id="dashboardAcordeonAgenda"></div>
+                    </div>
+                    <div class="dashboard-seccion-card" data-accion="clientes" role="button" tabindex="0">
+                        <div class="seccion-head">
+                            <span class="seccion-icon"><i class="fa-solid fa-users"></i></span>
+                            <span class="seccion-title">Clientas</span>
+                        </div>
+                        <div id="dashboardAcordeonClientas"></div>
+                    </div>
+                    <div class="dashboard-seccion-card" data-accion="servicios" role="button" tabindex="0">
+                        <div class="seccion-head">
+                            <span class="seccion-icon"><i class="fa-solid fa-sparkles"></i></span>
+                            <span class="seccion-title">Servicios</span>
+                        </div>
+                        <div id="dashboardAcordeonServicios"></div>
+                    </div>
+                </div>
+
+                <div class="dashboard-alertas-panel">
+                    <div class="dashboard-alertas-tabs">
+                        <button class="dashboard-tab-btn collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#dash-alertas" aria-expanded="false">
+                            <i class="fa-solid fa-bell"></i>
+                            <span>Alertas</span>
+                            <span id="dashboardAlertasBadge" class="dashboard-tab-badge">0</span>
+                        </button>
+                        <button class="dashboard-tab-btn collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#dash-sugerencias" aria-expanded="false">
+                            <i class="fa-solid fa-lightbulb"></i>
+                            <span>Sugerencias</span>
+                            <span id="dashboardSugerenciasBadge" class="dashboard-tab-badge dashboard-tab-badge--ok">0</span>
+                        </button>
+                    </div>
+                    <div id="dash-alertas" class="collapse dashboard-tab-panel">
+                        <div id="dashboardAlertas"></div>
+                    </div>
+                    <div id="dash-sugerencias" class="collapse dashboard-tab-panel">
+                        <div id="dashboardSugerencias"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
         
-        <div class="tab-pane fade show active" id="content-agenda">
+        <div class="tab-pane fade" id="content-agenda">
             <div class="card border-0 shadow-sm p-3">
                 <div id="calendario"></div>
             </div>
