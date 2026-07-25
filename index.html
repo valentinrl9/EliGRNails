@@ -291,6 +291,41 @@
     </div>
 </div>
 
+<div class="modal fade" id="modalDashboardClienta" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+        <div class="modal-content border-0 bg-dark">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title text-gold" id="dashboardClientaTitulo">Clienta</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <ul class="nav nav-tabs nav-fill border-secondary px-3 pt-2" id="dashboardClientaTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active text-gold" id="tab-resumen-clienta" data-bs-toggle="tab" data-bs-target="#panel-resumen-clienta" type="button">Resumen</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link text-gold" id="tab-historial-clienta" data-bs-toggle="tab" data-bs-target="#panel-historial-clienta" type="button">Historial</button>
+                    </li>
+                </ul>
+                <div class="tab-content p-4" id="dashboardClientaTabContent">
+                    <div class="tab-pane fade show active" id="panel-resumen-clienta" role="tabpanel">
+                        <div id="dashboardResumenContenido"></div>
+                    </div>
+                    <div class="tab-pane fade" id="panel-historial-clienta" role="tabpanel">
+                        <div id="dashboardHistorialContenido"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+                <button type="button" class="btn btn-dark border-gold" onclick="editarClientaDesdeDashboard()">
+                    <i class="fa-solid fa-pen me-2"></i>Editar ficha
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="modalClienta" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0">

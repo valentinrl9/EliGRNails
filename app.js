@@ -1280,6 +1280,9 @@ function abrirModalNuevoCliente() {
     // Ocultamos el botón eliminar para nuevas clientas
     document.getElementById('btnEliminarClienta').style.display = 'none';
 
+    const contenedorPuntos = document.getElementById('infoFidelidadModal');
+    if (contenedorPuntos) contenedorPuntos.innerHTML = '';
+
     // 4. Mostramos el modal
     const modalInstance = new bootstrap.Modal(modalEl);
     modalInstance.show();
@@ -1413,14 +1416,150 @@ async function guardarClienta() {
     }
 }
 
+async function abrirDashboardClienta(id) {
+    const idNum = parseInt(id);
+    const c = await db.clientas.get(idNum);
+    if (!c) return;
+
+    const modalEl = document.getElementById('modalDashboardClienta');
+    modalEl.setAttribute('data-cliente-id', idNum);
+
+    document.getElementById('dashboardClientaTitulo').textContent = c.nombre || 'Clienta';
+
+    const estado = await obtenerEstadoFidelidad(idNum);
+    const ventas = await db.ventas.where('clienteId').equals(idNum).toArray();
+    ventas.sort((a, b) => parseFechaVenta(b.fecha) - parseFechaVenta(a.fecha));
+
+    let totalEuros = 0;
+    let visitasPagadas = 0;
+    let regalos = 0;
+    const conteoServicios = {};
+
+    const historial = await Promise.all(ventas.map(async (v) => {
+        const ser = await db.servicios.get(parseInt(v.servicioId));
+        const nombreServicio = ser ? ser.nombre : 'Servicio eliminado';
+        const importe = parseFloat(v.importe) || 0;
+
+        if (importe > 0) {
+            visitasPagadas++;
+            totalEuros += importe;
+            conteoServicios[nombreServicio] = (conteoServicios[nombreServicio] || 0) + 1;
+        } else {
+            regalos++;
+        }
+
+        return { v, nombreServicio, importe };
+    }));
+
+    const servicioFavorito = Object.entries(conteoServicios).sort((a, b) => b[1] - a[1])[0];
+    const primeraVisita = ventas.length ? parseFechaVenta(ventas[ventas.length - 1].fecha) : null;
+    const ultimaVisita = ventas.length ? parseFechaVenta(ventas[0].fecha) : null;
+
+    const fmtFecha = (f) => f && !isNaN(f.getTime())
+        ? f.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
+        : '—';
+
+    document.getElementById('dashboardResumenContenido').innerHTML = `
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-md-3">
+                <div class="dashboard-stat-card">
+                    <div class="stat-valor">${visitasPagadas}</div>
+                    <div class="stat-label">Visitas pagadas</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="dashboard-stat-card">
+                    <div class="stat-valor">${totalEuros.toFixed(2)}€</div>
+                    <div class="stat-label">Total gastado</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="dashboard-stat-card">
+                    <div class="stat-valor">${regalos}</div>
+                    <div class="stat-label">Regalos</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="dashboard-stat-card">
+                    <div class="stat-valor">${estado.actual}/10</div>
+                    <div class="stat-label">Fidelidad ${estado.tocaRegalo ? '🎁' : ''}</div>
+                </div>
+            </div>
+        </div>
+        <div class="progress mb-4" style="height: 10px; background: #333; border-radius: 10px;">
+            <div class="progress-bar" style="width: ${estado.porcentaje}%; background: linear-gradient(90deg, #c5a059, #fcf6ba);"></div>
+        </div>
+        <div class="row">
+            <div class="col-md-6">
+                ${c.telefono ? `<div class="dashboard-info-row"><i class="fa-solid fa-phone"></i> ${escaparHTML(c.telefono)}</div>` : ''}
+                ${c.email ? `<div class="dashboard-info-row"><i class="fa-solid fa-envelope"></i> ${escaparHTML(c.email)}</div>` : ''}
+                ${c.fechaNacimiento ? `<div class="dashboard-info-row"><i class="fa-solid fa-cake-candles"></i> ${escaparHTML(c.fechaNacimiento)}</div>` : ''}
+                ${c.localidad ? `<div class="dashboard-info-row"><i class="fa-solid fa-location-dot"></i> ${escaparHTML(c.localidad)}</div>` : ''}
+            </div>
+            <div class="col-md-6">
+                <div class="dashboard-info-row"><i class="fa-solid fa-calendar"></i> Primera visita: ${fmtFecha(primeraVisita)}</div>
+                <div class="dashboard-info-row"><i class="fa-solid fa-calendar-check"></i> Última visita: ${fmtFecha(ultimaVisita)}</div>
+                ${servicioFavorito ? `<div class="dashboard-info-row"><i class="fa-solid fa-star"></i> Servicio habitual: ${escaparHTML(servicioFavorito[0])} (${servicioFavorito[1]}x)</div>` : ''}
+            </div>
+        </div>
+    `;
+
+    const historialHtml = historial.length === 0
+        ? '<p class="text-muted text-center py-4">Esta clienta aún no tiene visitas registradas.</p>'
+        : `
+            <div class="table-responsive">
+                <table class="table table-dark table-hover dashboard-historial-table mb-0">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Servicio</th>
+                            <th>Importe</th>
+                            <th>Pago</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${historial.map(({ v, nombreServicio, importe }) => {
+                            const f = parseFechaVenta(v.fecha);
+                            const fechaStr = !isNaN(f.getTime())
+                                ? `${f.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })} ${f.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`
+                                : '—';
+                            return `
+                                <tr>
+                                    <td>${fechaStr}</td>
+                                    <td>${escaparHTML(nombreServicio)}</td>
+                                    <td class="fw-bold ${importe === 0 ? 'dashboard-regalo-badge' : ''}">${importe === 0 ? 'Regalo' : importe.toFixed(2) + '€'}</td>
+                                    <td>${importe > 0 ? escaparHTML(v.metodoPago || '—') : '—'}</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+    document.getElementById('dashboardHistorialContenido').innerHTML = historialHtml;
+
+    const tabResumen = document.getElementById('tab-resumen-clienta');
+    if (tabResumen) bootstrap.Tab.getOrCreateInstance(tabResumen).show();
+
+    const modalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modalInstance.show();
+}
+
+function editarClientaDesdeDashboard() {
+    const modalDash = document.getElementById('modalDashboardClienta');
+    const id = modalDash.getAttribute('data-cliente-id');
+    if (!id) return;
+
+    bootstrap.Modal.getInstance(modalDash)?.hide();
+    prepararEdicionClienta(id);
+}
+
 async function prepararEdicionClienta(id) {
-    // 1. Buscamos la clienta en la base de datos
     const c = await db.clientas.get(parseInt(id));
     if (!c) return;
 
-    // --- NUEVO: Obtenemos el estado de fidelidad para mostrarlo en el modal ---
     const estado = await obtenerEstadoFidelidad(id);
-    // -------------------------------------------------------------------------
 
     const modalEl = document.getElementById('modalClienta');
 
@@ -1528,7 +1667,7 @@ async function listarClientas() {
 
     contenedor.innerHTML = clientasOrdenadas.map(c => `
             <div class="col-12 clienta-fila">
-                <div onclick="prepararEdicionClienta(${c.idLimpio})" 
+                <div onclick="abrirDashboardClienta(${c.idLimpio})" 
                      style="cursor: pointer !important; 
                             display: flex !important; 
                             align-items: center !important; 
