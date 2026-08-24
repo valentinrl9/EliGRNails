@@ -1037,13 +1037,28 @@ canvas {
     align-items: center;
     justify-content: center;
     background-color: #1a1a1a;
-    border: 1px solid red;
-    color: red;
+    border: 1px solid #555;
+    color: #888;
     border-radius: 50%;
     cursor: pointer;
     transition: all 0.3s ease;
     vertical-align: middle;
-    margin-left: 15px; /* Separación del logo */
+    margin-left: 15px;
+}
+
+.btn-google-sync.connecting {
+    border-color: #c5a059;
+    color: #c5a059;
+}
+
+.btn-google-sync.connecting .status-dot {
+    background-color: #c5a059;
+    animation: google-pulse 1s ease-in-out infinite;
+}
+
+@keyframes google-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
 }
 
 /* Icono G de Google */

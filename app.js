@@ -1114,6 +1114,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             await cargarHistorialVentas();
         }
     }, 800);
+
+    // 3. Google Calendar: reconectar en silencio si ya se autorizó antes
+    setTimeout(() => intentarReconexionGoogleAutomatica(), 600);
 });
 
 
@@ -1390,7 +1393,16 @@ async function agendarCita() {
         }
         
         // --- INTEGRACIÓN CON GOOGLE CALENDAR (solo si ya está conectado) ---
-        if (estaGoogleConectado() && gapi.client.calendar) {
+        if (!estaGoogleConectado() && usuarioQuiereGoogleVinculado()) {
+            try {
+                await asegurarGoogleListo();
+                await renovarTokenGoogleSilencioso();
+            } catch (e) {
+                console.warn('No se pudo renovar Google antes de sincronizar la cita:', e);
+            }
+        }
+
+        if (estaGoogleConectado() && gapi.client?.calendar) {
             try {
                 const citaActualizada = await db.agenda.get(idFinal);
 
@@ -3168,9 +3180,11 @@ async function renderizarGraficos(ventas) {
 }
 
 //Lógica para el calendario de Gmail
-async function crearEventoGoogle(cita) {
+async function crearEventoGoogle(cita, opciones = {}) {
+    const silencioso = opciones.silencioso === true;
+
     if (!gapi.client.calendar) {
-        console.error("Google Calendar no está listo");
+        if (!silencioso) console.error("Google Calendar no está listo");
         return;
     }
 
@@ -3198,27 +3212,44 @@ async function crearEventoGoogle(cita) {
         });
 
         console.log('✅ Evento creado en Google Calendar: ' + response.result.htmlLink);
-        return response.result.id; 
+        return response.result.id;
     } catch (err) {
         console.error('❌ Error creando evento en Google:', err);
-        // Si el error es 401, es que el token ha caducado y hay que volver a conectar
         if (err.status === 401) {
-            Swal.fire({
-                ...swalConfig,
-                icon: 'error',
-                title: 'Sesión de Google Caducada',
-                text: 'La sesión de Google ha caducado. Por favor, pulsa "Conectar Calendario" de nuevo.',
-                confirmButtonText: 'Entendido'
-            });
+            const renovado = await renovarTokenGoogleSilencioso();
+            if (renovado) return crearEventoGoogle(cita, opciones);
+            if (!silencioso) {
+                Swal.fire({
+                    ...swalConfig,
+                    icon: 'error',
+                    title: 'Sesión de Google caducada',
+                    text: 'Pulsa el icono de Google para reconectar.',
+                    confirmButtonText: 'Entendido'
+                });
+            }
         }
     }
 }
 
 
-// Google Calendar — carga bajo demanda (solo al pulsar el botón)
+// Google Calendar — reconexión automática si el usuario ya autorizó antes
 const GOOGLE_GSI_URL = 'https://accounts.google.com/gsi/client';
 const GOOGLE_GAPI_URL = 'https://apis.google.com/js/api.js';
+const GOOGLE_VINCULADO_KEY = 'eligr_google_calendar_vinculado';
 let googleCargaPromesa = null;
+let googleReconexionEnCurso = false;
+
+function usuarioQuiereGoogleVinculado() {
+    return localStorage.getItem(GOOGLE_VINCULADO_KEY) === '1';
+}
+
+function marcarGoogleVinculado() {
+    localStorage.setItem(GOOGLE_VINCULADO_KEY, '1');
+}
+
+function limpiarGoogleVinculado() {
+    localStorage.removeItem(GOOGLE_VINCULADO_KEY);
+}
 
 function cargarScriptExterno(src) {
     return new Promise((resolve, reject) => {
@@ -3265,7 +3296,8 @@ function inicializarGoogle() {
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
         scope: SCOPES,
-        callback: (tokenResponse) => {
+        callback: async (tokenResponse) => {
+            googleReconexionEnCurso = false;
             if (tokenResponse.error) {
                 console.warn("Google OAuth:", tokenResponse.error);
                 actualizarBotonGoogle(false);
@@ -3273,22 +3305,37 @@ function inicializarGoogle() {
                     mostrarErrorGoogleOAuth(tokenResponse.error);
                 }
                 window._googleAuthManual = false;
+                if (window._googleTokenWaiter) {
+                    window._googleTokenWaiter(false);
+                    window._googleTokenWaiter = null;
+                }
                 return;
             }
             if (tokenResponse && tokenResponse.access_token) {
                 gapi.client.setToken(tokenResponse);
-                console.log("✅ Acceso concedido a Google Calendar");
+                marcarGoogleVinculado();
+                console.log("✅ Google Calendar conectado");
                 actualizarBotonGoogle(true);
+                await sincronizarCitasPendientesGoogle();
             }
             window._googleAuthManual = false;
+            if (window._googleTokenWaiter) {
+                window._googleTokenWaiter(true);
+                window._googleTokenWaiter = null;
+            }
         },
         error_callback: (err) => {
+            googleReconexionEnCurso = false;
             console.warn("Google OAuth error:", err);
             actualizarBotonGoogle(false);
             if (window._googleAuthManual) {
                 mostrarErrorGoogleOAuth(err?.type || 'unknown');
             }
             window._googleAuthManual = false;
+            if (window._googleTokenWaiter) {
+                window._googleTokenWaiter(false);
+                window._googleTokenWaiter = null;
+            }
         },
     });
     gsiInited = true;
@@ -3321,17 +3368,96 @@ function mostrarErrorGoogleOAuth(codigo) {
 
 function solicitarTokenGoogle(manual = false) {
     if (!tokenClient) {
-        Swal.fire({
-            ...swalConfig,
-            icon: 'error',
-            title: 'Google aún no está listo',
-            text: 'Espera un segundo y vuelve a pulsar el botón de Google.',
-            confirmButtonText: 'Entendido'
-        });
+        if (manual) {
+            Swal.fire({
+                ...swalConfig,
+                icon: 'error',
+                title: 'Google aún no está listo',
+                text: 'Espera un segundo y vuelve a pulsar el botón de Google.',
+                confirmButtonText: 'Entendido'
+            });
+        }
         return;
     }
     window._googleAuthManual = manual;
-    tokenClient.requestAccessToken({ prompt: manual ? 'select_account' : '' });
+    if (!manual) actualizarBotonGoogle(null, true);
+    tokenClient.requestAccessToken({ prompt: manual ? '' : '' });
+}
+
+async function renovarTokenGoogleSilencioso() {
+    if (!usuarioQuiereGoogleVinculado() || !tokenClient) return false;
+    if (estaGoogleConectado()) return true;
+
+    return new Promise((resolve) => {
+        window._googleTokenWaiter = resolve;
+        solicitarTokenGoogle(false);
+        setTimeout(() => {
+            if (window._googleTokenWaiter) {
+                window._googleTokenWaiter(false);
+                window._googleTokenWaiter = null;
+            }
+        }, 12000);
+    });
+}
+
+async function intentarReconexionGoogleAutomatica() {
+    if (!usuarioQuiereGoogleVinculado() || estaGoogleConectado() || googleReconexionEnCurso) return;
+
+    googleReconexionEnCurso = true;
+    try {
+        await asegurarGoogleListo();
+        solicitarTokenGoogle(false);
+    } catch (error) {
+        googleReconexionEnCurso = false;
+        console.warn('Reconexión automática con Google:', error);
+        actualizarBotonGoogle(false);
+    }
+}
+
+async function construirDatosCitaDesdeAgenda(cita) {
+    const cliente = await db.clientas.get(parseInt(cita.clienteId));
+    const servicio = await db.servicios.get(parseInt(cita.servicioId));
+    if (!cliente || !servicio) return null;
+
+    const fecha = cita.fecha;
+    return {
+        nombreClienta: cliente.nombre,
+        servicio: servicio.nombre,
+        fechaInicio: fecha,
+        fechaFin: new Date(new Date(fecha).getTime() + 60 * 60 * 1000).toISOString()
+    };
+}
+
+async function sincronizarCitasPendientesGoogle() {
+    if (!estaGoogleConectado() || !gapi.client.calendar) return;
+
+    const citas = await db.agenda.toArray();
+    const pendientes = citas.filter(c => !c.googleEventId);
+    if (!pendientes.length) return;
+
+    console.log(`📤 Sincronizando ${pendientes.length} cita(s) pendientes con Google Calendar...`);
+    let sincronizadas = 0;
+
+    for (const cita of pendientes) {
+        try {
+            const datosCita = await construirDatosCitaDesdeAgenda(cita);
+            if (!datosCita) continue;
+
+            const googleId = await crearEventoGoogle(datosCita, { silencioso: true });
+            if (googleId) {
+                await db.agenda.update(cita.id, { googleEventId: googleId });
+                sincronizadas++;
+            }
+        } catch (err) {
+            console.warn('No se pudo sincronizar cita', cita.id, err);
+        }
+    }
+
+    if (sincronizadas > 0 && typeof calendar !== 'undefined' && calendar) {
+        calendar.refetchEvents();
+    }
+
+    console.log(`✅ ${sincronizadas} cita(s) enviadas a Google Calendar`);
 }
 
 function estaGoogleConectado() {
@@ -3341,16 +3467,25 @@ function estaGoogleConectado() {
         && gapi.client.getToken() !== null;
 }
 
-function actualizarBotonGoogle(conectado) {
+function actualizarBotonGoogle(conectado, conectando = false) {
     const btn = document.getElementById('btnConectarGoogle');
     if (!btn) return;
+
+    btn.classList.remove('connected', 'connecting');
+
+    if (conectando) {
+        btn.classList.add('connecting');
+        btn.title = 'Conectando con Google Calendar...';
+        return;
+    }
 
     if (conectado) {
         btn.classList.add('connected');
         btn.title = 'Google Calendar conectado (pulsa para desconectar)';
     } else {
-        btn.classList.remove('connected');
-        btn.title = 'Conectar con Google Calendar (opcional)';
+        btn.title = usuarioQuiereGoogleVinculado()
+            ? 'Google Calendar desconectado — pulsa para reconectar'
+            : 'Conectar con Google Calendar (solo una vez)';
     }
 }
 
@@ -3371,6 +3506,7 @@ async function manejarAuthClick() {
                 google.accounts.oauth2.revoke(token.access_token, () => {});
             }
             gapi.client.setToken(null);
+            limpiarGoogleVinculado();
             actualizarBotonGoogle(false);
         }
         return;
