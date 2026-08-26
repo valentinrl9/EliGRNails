@@ -1,30 +1,26 @@
-// =========================================
+﻿// =========================================
 // 1. CONFIGURACIÓN DE BASE DE DATOS (V2)
 // =========================================
 
-//Constantes de Google para el calendario
-// Restringe este Client ID en Google Cloud Console a los orígenes exactos de producción.
-const CLIENT_ID = '674688988885-fmjjdoe5svfabqj1t619c940enn6gc3d.apps.googleusercontent.com';
-const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
-const SCOPES = 'https://www.googleapis.com/auth/calendar.events';
-
-let tokenClient;
-let gapiInited = false;
-let gsiInited = false;
-
 const db = new Dexie("SalonDB");
 
-// Subimos a versión 3
 db.version(3).stores({
     clientas: "++id, nombre, telefono, email, direccion, cp, localidad, observaciones, fechaNacimiento",
     servicios: "++id, nombre, coste",
     agenda: "++id, clienteId, servicioId, fecha",
     ventas: "++id, clienteId, servicioId, fecha, importe, metodoPago" 
 }).upgrade(tx => {
-    // Esta parte asegura que las clientas antiguas no den error al no tener el campo nuevo
     return tx.clientas.toCollection().modify({
         fechaNacimiento: ""
     });
+});
+
+db.version(4).stores({
+    clientas: "++id, nombre, telefono, email, direccion, cp, localidad, observaciones, fechaNacimiento",
+    servicios: "++id, nombre, coste",
+    agenda: "++id, clienteId, servicioId, fecha",
+    ventas: "++id, clienteId, servicioId, fecha, importe, metodoPago",
+    registroCumples: "++id, [clienteId+fecha], clienteId, fecha, estado"
 });
 
 // --- 🎨 CONFIGURACIÓN DE COLORES SWEETALERT2 PARA ELI-GR NAILS ---
@@ -59,6 +55,14 @@ function escaparHTML(str) {
     return str.replace(/[&<>"']/g, m => map[m]);
 }
 
+function normalizarTextoBusqueda(texto) {
+    if (!texto) return "";
+    return texto
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+}
+
 function normalizarNombre(texto) {
     return texto ? texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
 }
@@ -86,15 +90,26 @@ async function hashPin(pin) {
 const PIN_STORAGE_KEY = 'eligr_pin_hash';
 const PIN_SESSION_KEY = 'eligr_unlocked';
 
+const CUMPLE_HORA_PROGRAMADA = 9;
+const CUMPLE_MINUTO_PROGRAMADA = 0;
+const CUMPLE_CHECK_STORAGE_PREFIX = 'eligr_cumple_ejecutado_';
+const CUMPLE_ULTIMO_DIA_PROCESADO_KEY = 'eligr_cumple_ultimo_dia_procesado';
+const TELEFONO_SALON_CUMPLE = '615821328';
+const CUMPLE_DELAY_WHATSAPP_MS = 3500;
+const GOOGLE_REVIEW_URL = 'https://g.page/r/CbBUjYyRnDvoEBI/review';
+const INSTAGRAM_HANDLE = '@eli.gr.nails';
+let intervalCheckCumple = null;
+let procesandoCumplesAutomatico = false;
+
 async function verificarBloqueoApp() {
     const hashGuardado = localStorage.getItem(PIN_STORAGE_KEY);
     const overlay = document.getElementById('overlayBloqueo');
-    if (!overlay) return;
+    if (!overlay) return true;
 
     // Sin PIN configurado: app libre (configura PIN con el botón de la llave)
     if (!hashGuardado || sessionStorage.getItem(PIN_SESSION_KEY) === '1') {
         overlay.style.display = 'none';
-        return;
+        return true;
     }
 
     overlay.style.display = 'flex';
@@ -123,12 +138,15 @@ async function verificarBloqueoApp() {
 
         sessionStorage.setItem(PIN_SESSION_KEY, '1');
         overlay.style.display = 'none';
+        configurarProgramacionCumpleaños();
     };
 
     if (btnPin) btnPin.onclick = desbloquear;
     if (inputPin) {
         inputPin.onkeydown = (e) => { if (e.key === 'Enter') desbloquear(); };
     }
+
+    return false;
 }
 
 async function cambiarPinAcceso() {
@@ -295,8 +313,10 @@ function configurarBotonesApp() {
     document.getElementById('btnRestaurarOverlay')?.addEventListener('click', dispararImportacionBackup);
     document.getElementById('importFileNavbar')?.addEventListener('change', importarBackup);
     configurarOrdenClientas();
+    configurarBuscadorClientas();
+    configurarSelectorClientaCita();
+    configurarModalClientaDesdeCita();
     configurarDashboardEventos();
-    document.getElementById('btnConectarGoogle')?.addEventListener('click', manejarAuthClick);
 }
 
 let ordenClientas = { campo: 'nombre', asc: true };
@@ -342,6 +362,233 @@ function configurarOrdenClientas() {
     actualizarCabeceraOrdenClientas();
 }
 
+function configurarBuscadorClientas() {
+    const input = document.getElementById('buscadorClientas');
+    if (!input || input.dataset.bound) return;
+    input.dataset.bound = '1';
+    input.addEventListener('input', () => {
+        clearTimeout(debounceBusquedaClientas);
+        debounceBusquedaClientas = setTimeout(() => listarClientas(), 200);
+    });
+}
+
+function filtrarClientasPorTexto(clientas, texto) {
+    const filtro = normalizarTextoBusqueda(texto);
+    if (!filtro) return clientas;
+
+    return clientas.filter(c => {
+        const nombre = normalizarTextoBusqueda(c.nombre);
+        const telefono = normalizarTelefono(c.telefono || "");
+        const telFiltro = normalizarTelefono(texto);
+        return nombre.includes(filtro)
+            || (c.telefono || "").includes(texto)
+            || (telFiltro && telefono.includes(telFiltro));
+    });
+}
+
+async function cargarCacheClientas() {
+    const clis = await db.clientas.toArray();
+    clis.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", 'es', { sensitivity: 'base' }));
+    cacheClientasLista = clis;
+    return clis;
+}
+
+function seleccionarClientaEnCita(id, nombre) {
+    const selCli = document.getElementById('selCli');
+    const input = document.getElementById('buscadorCitaClienta');
+    const lista = document.getElementById('listaCitaClientas');
+    if (selCli) selCli.value = id ? String(id) : '';
+    if (input) input.value = nombre || '';
+    if (lista) {
+        lista.innerHTML = '';
+        lista.classList.remove('open');
+    }
+}
+
+function limpiarSelectorClientaCita() {
+    seleccionarClientaEnCita('', '');
+}
+
+function renderListaCitaClientas(clientas) {
+    const lista = document.getElementById('listaCitaClientas');
+    if (!lista) return;
+
+    if (!clientas.length) {
+        lista.innerHTML = '<div class="clienta-combobox-empty">No hay clientas con ese texto</div>';
+        lista.classList.add('open');
+        return;
+    }
+
+    const max = 8;
+    const visibles = clientas.slice(0, max);
+    lista.innerHTML = visibles.map(c => `
+        <button type="button" class="clienta-combobox-item" data-id="${c.id}">
+            <span class="item-nombre">${escaparHTML(c.nombre)}</span>
+            ${c.telefono ? `<span class="item-tel">${escaparHTML(c.telefono)}</span>` : ''}
+        </button>
+    `).join('') + (clientas.length > max
+        ? `<div class="clienta-combobox-more">+${clientas.length - max} más — sigue escribiendo para acotar</div>`
+        : '');
+
+    lista.classList.add('open');
+}
+
+function filtrarYMostrarClientasCita(texto) {
+    const filtradas = filtrarClientasPorTexto(cacheClientasLista, texto);
+    renderListaCitaClientas(filtradas);
+}
+
+function setSelectorClientaCitaHabilitado(habilitado) {
+    const input = document.getElementById('buscadorCitaClienta');
+    const btn = document.getElementById('btnNuevaClientaDesdeCita');
+    const lista = document.getElementById('listaCitaClientas');
+    if (input) input.disabled = !habilitado;
+    if (btn) btn.disabled = !habilitado;
+    if (!habilitado && lista) {
+        lista.innerHTML = '';
+        lista.classList.remove('open');
+    }
+}
+
+function configurarSelectorClientaCita() {
+    const input = document.getElementById('buscadorCitaClienta');
+    const lista = document.getElementById('listaCitaClientas');
+    const btnNueva = document.getElementById('btnNuevaClientaDesdeCita');
+    if (!input || !lista || input.dataset.bound) return;
+    input.dataset.bound = '1';
+
+    input.addEventListener('input', () => {
+        clearTimeout(debounceBusquedaCitaClienta);
+        debounceBusquedaCitaClienta = setTimeout(() => {
+            const selCli = document.getElementById('selCli');
+            if (selCli) selCli.value = '';
+            filtrarYMostrarClientasCita(input.value.trim());
+        }, 150);
+    });
+
+    input.addEventListener('focus', () => {
+        if (input.disabled) return;
+        filtrarYMostrarClientasCita(input.value.trim());
+    });
+
+    lista.addEventListener('click', (e) => {
+        const item = e.target.closest('.clienta-combobox-item');
+        if (!item) return;
+        const clienta = cacheClientasLista.find(c => String(c.id) === String(item.dataset.id));
+        if (clienta) seleccionarClientaEnCita(clienta.id, clienta.nombre);
+    });
+
+    btnNueva?.addEventListener('click', () => abrirModalNuevoClienteDesdeCita());
+
+    document.addEventListener('click', (e) => {
+        const combo = document.getElementById('comboboxClientaCita');
+        if (!combo || combo.contains(e.target)) return;
+        lista.classList.remove('open');
+    });
+}
+
+function configurarModalClientaDesdeCita() {
+    const modalClienta = document.getElementById('modalClienta');
+    if (!modalClienta || modalClienta.dataset.desdeCitaBound) return;
+    modalClienta.dataset.desdeCitaBound = '1';
+
+    modalClienta.addEventListener('hidden.bs.modal', () => {
+        if (omitirReaperturaCitaPorGuardado) return;
+        if (!citaPendienteTrasClienta) return;
+        const pendiente = citaPendienteTrasClienta;
+        citaPendienteTrasClienta = null;
+        modalClienta.removeAttribute('data-desde-cita');
+        reabrirModalCitaPendiente(pendiente);
+    });
+}
+
+function capturarEstadoModalCita() {
+    const modalCita = document.getElementById('modalCita');
+    return {
+        fecha: document.getElementById('citaFecha')?.value || '',
+        servicioId: document.getElementById('selSer')?.value || '',
+        editId: modalCita?.getAttribute('data-edit-id') || null,
+        titulo: document.getElementById('modalCitaTitulo')?.textContent || 'Nueva Cita',
+        cobrada: modalCita?.querySelector('#buscadorCitaClienta')?.disabled === true
+    };
+}
+
+function abrirModalNuevoClienteDesdeCita() {
+    const modalCita = document.getElementById('modalCita');
+    if (!modalCita || modalCita.querySelector('#buscadorCitaClienta')?.disabled) return;
+
+    citaPendienteTrasClienta = capturarEstadoModalCita();
+    const instanciaCita = bootstrap.Modal.getInstance(modalCita);
+    if (instanciaCita) instanciaCita.hide();
+
+    abrirModalNuevoCliente(true);
+}
+
+async function reabrirModalCitaPendiente(pendiente) {
+    const modalEl = document.getElementById('modalCita');
+    if (!modalEl || !pendiente) return;
+
+    await actualizarSelectores();
+
+    if (pendiente.editId) {
+        await prepararEdicionCita(pendiente.editId);
+    } else {
+        resetModalCitaNueva();
+        document.getElementById('modalCitaTitulo').textContent = pendiente.titulo || 'Nueva Cita';
+    }
+
+    if (pendiente.servicioId) document.getElementById('selSer').value = pendiente.servicioId;
+    if (pendiente.fecha) document.getElementById('citaFecha').value = pendiente.fecha;
+
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+async function reanudarCitaTrasNuevaClienta(clientaId) {
+    const pendiente = citaPendienteTrasClienta;
+    citaPendienteTrasClienta = null;
+    if (!pendiente) return;
+
+    await actualizarSelectores();
+    const clienta = await db.clientas.get(parseInt(clientaId));
+
+    if (pendiente.editId) {
+        await prepararEdicionCita(pendiente.editId);
+    } else {
+        resetModalCitaNueva();
+        document.getElementById('modalCitaTitulo').textContent = pendiente.titulo || 'Nueva Cita';
+    }
+
+    seleccionarClientaEnCita(clientaId, clienta?.nombre || '');
+    if (pendiente.servicioId) document.getElementById('selSer').value = pendiente.servicioId;
+    if (pendiente.fecha) document.getElementById('citaFecha').value = pendiente.fecha;
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('modalCita')).show();
+}
+
+function resetModalCitaNueva() {
+    const modalEl = document.getElementById('modalCita');
+    if (!modalEl) return;
+
+    modalEl.removeAttribute('data-edit-id');
+    modalEl.querySelectorAll('input:not([type="hidden"]), select').forEach(i => {
+        i.disabled = false;
+        if (i.id !== 'buscadorCitaClienta') i.value = '';
+    });
+
+    limpiarSelectorClientaCita();
+    setSelectorClientaCitaHabilitado(true);
+
+    const btnGuardar = modalEl.querySelector('button[onclick="agendarCita()"]');
+    const btnEliminar = document.getElementById('btnEliminarCita');
+    const btnCobrar = document.getElementById('btnCobrarCita');
+    const btnDesbloquear = document.getElementById('btnForzarDesbloqueo');
+
+    if (btnGuardar) btnGuardar.style.display = 'block';
+    if (btnEliminar) btnEliminar.style.display = 'none';
+    if (btnCobrar) btnCobrar.style.display = 'none';
+    if (btnDesbloquear) btnDesbloquear.style.display = 'none';
+}
+
 function ordenarClientasEnriquecidas(items) {
     const dir = ordenClientas.asc ? 1 : -1;
 
@@ -382,6 +629,11 @@ function ordenarClientasEnriquecidas(items) {
 }
 
 let cargandoHistorialVentas = false;
+let debounceBusquedaClientas = null;
+let debounceBusquedaCitaClienta = null;
+let cacheClientasLista = [];
+let citaPendienteTrasClienta = null;
+let omitirReaperturaCitaPorGuardado = false;
 let recargaVentasPendiente = false;
 
 function parseFechaVenta(fecha) {
@@ -444,27 +696,346 @@ function esMismoDia(a, b) {
 }
 
 function cumpleEnProximosDias(fechaNacimiento, diasVentana = 7) {
-    if (!fechaNacimiento || !String(fechaNacimiento).includes('/')) return false;
-    const partes = String(fechaNacimiento).split('/');
-    const diaNac = parseInt(partes[0], 10);
-    const mesNac = parseInt(partes[1], 10);
-    if (isNaN(diaNac) || isNaN(mesNac)) return false;
+    const partes = parseDiaMesCumple(fechaNacimiento);
+    if (!partes) return false;
 
     const hoy = inicioDia();
     for (let i = 0; i <= diasVentana; i++) {
         const d = new Date(hoy);
         d.setDate(d.getDate() + i);
-        if (d.getDate() === diaNac && d.getMonth() + 1 === mesNac) return true;
+        if (d.getDate() === partes.dia && d.getMonth() + 1 === partes.mes) return true;
     }
     return false;
 }
 
 function esCumpleHoy(fechaNacimiento) {
-    if (!fechaNacimiento || !String(fechaNacimiento).includes('/')) return false;
-    const partes = String(fechaNacimiento).split('/');
+    const partes = parseDiaMesCumple(fechaNacimiento);
+    if (!partes) return false;
     const hoy = new Date();
-    return parseInt(partes[0], 10) === hoy.getDate()
-        && parseInt(partes[1], 10) === hoy.getMonth() + 1;
+    return partes.dia === hoy.getDate() && partes.mes === hoy.getMonth() + 1;
+}
+
+function parseDiaMesCumple(fechaNacimiento) {
+    if (!fechaNacimiento) return null;
+    const str = String(fechaNacimiento).trim();
+    if (!str) return null;
+
+    if (str.includes('/')) {
+        const partes = str.split('/').map(p => parseInt(p, 10));
+        const dia = partes[0];
+        const mes = partes[1];
+        if (isNaN(dia) || isNaN(mes) || mes < 1 || mes > 12 || dia < 1 || dia > 31) return null;
+        return { dia, mes };
+    }
+
+    if (str.includes('-')) {
+        const f = new Date(str);
+        if (isNaN(f.getTime())) return null;
+        return { dia: f.getUTCDate(), mes: f.getUTCMonth() + 1 };
+    }
+
+    return null;
+}
+
+function yaFelicitadaCumpleEsteAno(clienta, año = new Date().getFullYear()) {
+    const marcado = parseInt(clienta?.ultimoCumpleFelicitado, 10);
+    return !isNaN(marcado) && marcado === año;
+}
+
+function esCumpleDeClientaHoy(fechaNacimiento) {
+    const partes = parseDiaMesCumple(fechaNacimiento);
+    if (!partes) return false;
+    const hoy = new Date();
+    return partes.dia === hoy.getDate() && partes.mes === hoy.getMonth() + 1;
+}
+
+async function ejecutarCheckCumpleaños() {
+    await procesarCumplesAutomatico({ forzarHoy: true });
+}
+
+function fechaClaveDesdeDate(fecha) {
+    const mes = String(fecha.getMonth() + 1).padStart(2, '0');
+    const dia = String(fecha.getDate()).padStart(2, '0');
+    return `${fecha.getFullYear()}-${mes}-${dia}`;
+}
+
+function parseClaveFecha(clave) {
+    const [y, m, d] = clave.split('-').map(Number);
+    return new Date(y, m - 1, d);
+}
+
+function claveFechaSiguiente(clave) {
+    const f = parseClaveFecha(clave);
+    f.setDate(f.getDate() + 1);
+    return fechaClaveDesdeDate(f);
+}
+
+function ayerClaveCumple() {
+    const f = new Date();
+    f.setDate(f.getDate() - 1);
+    return fechaClaveDesdeDate(f);
+}
+
+function esCumpleEnFecha(fechaNacimiento, fecha) {
+    const partes = parseDiaMesCumple(fechaNacimiento);
+    if (!partes) return false;
+    return partes.dia === fecha.getDate() && partes.mes === fecha.getMonth() + 1;
+}
+
+function mensajeFelicitacionClienta(nombre) {
+    return `¡Hola ${nombre}! 🎂 Desde Eli·GR Nails te deseamos un muy feliz cumpleaños. ✨ Tenemos un regalito especial para ti en el salón, ¡pásate a vernos cuando quieras!`;
+}
+
+function mensajeRegistroSalon(nombre) {
+    return `✅ Registro: Felicitación de cumpleaños enviada a *${nombre}*`;
+}
+
+function mensajeCumpleOmitidoSalon(nombre, fechaClave) {
+    const [y, m, d] = fechaClave.split('-');
+    return `⚠️ Aviso Eli·GR: El cumpleaños de *${nombre}* (${d}/${m}/${y}) pasó sin enviar el WhatsApp de felicitación. Revisa la ficha de la clienta.`;
+}
+
+function mensajeAgradecimientoPostCobro(nombre) {
+    return `Hola ${nombre}, gracias por venir a Eli·GR Nails ✨
+Ha sido un placer atenderte. Si quieres, y no lo has hecho aún, puedes dejarnos tu opinión en Google — nos ayuda un montón: ${GOOGLE_REVIEW_URL}
+También puedes seguirnos en Instagram: ${INSTAGRAM_HANDLE}
+¡Te esperamos pronto!`;
+}
+
+async function enviarWhatsAppAgradecimientoCobro(clienteId) {
+    const clienta = await db.clientas.get(parseInt(clienteId, 10));
+    if (!clienta || esPerfilEspecial(clienta.nombre)) return false;
+
+    const url = construirUrlWhatsApp(clienta.telefono, mensajeAgradecimientoPostCobro(clienta.nombre));
+    if (!url) return false;
+
+    return abrirWhatsAppEnlace(url);
+}
+
+function construirUrlWhatsApp(telefono, mensaje) {
+    const tel = normalizarTelefono(telefono);
+    if (!tel) return null;
+    return `https://wa.me/34${tel}?text=${encodeURIComponent(mensaje)}`;
+}
+
+function abrirWhatsAppEnlace(url) {
+    if (!url) return false;
+    const ventana = window.open(url, '_blank', 'noopener,noreferrer');
+    if (ventana) return true;
+
+    const enlace = document.createElement('a');
+    enlace.href = url;
+    enlace.target = '_blank';
+    enlace.rel = 'noopener noreferrer';
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    return true;
+}
+
+function esperar(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function obtenerRegistroCumple(clienteId, fechaClave) {
+    return db.registroCumples
+        .where('[clienteId+fecha]')
+        .equals([parseInt(clienteId), fechaClave])
+        .first();
+}
+
+async function guardarRegistroCumple(clienteId, fechaClave, estado) {
+    const idNum = parseInt(clienteId);
+    const existente = await obtenerRegistroCumple(idNum, fechaClave);
+    if (existente) {
+        await db.registroCumples.update(existente.id, { estado });
+    } else {
+        await db.registroCumples.add({ clienteId: idNum, fecha: fechaClave, estado });
+    }
+}
+
+async function clientasCumpleEnClaveFecha(fechaClave, clientas) {
+    const fecha = parseClaveFecha(fechaClave);
+    const candidatas = clientas.filter(c =>
+        c.fechaNacimiento
+        && !esPerfilEspecial(c.nombre)
+        && esCumpleEnFecha(c.fechaNacimiento, fecha)
+    );
+
+    const pendientes = [];
+    for (const c of candidatas) {
+        const registro = await obtenerRegistroCumple(c.id, fechaClave);
+        if (registro?.estado === 'enviado' || registro?.estado === 'omitido_avisado') continue;
+        pendientes.push(c);
+    }
+    return pendientes;
+}
+
+async function enviarWhatsAppSalon(mensaje) {
+    const url = construirUrlWhatsApp(TELEFONO_SALON_CUMPLE, mensaje);
+    abrirWhatsAppEnlace(url);
+    await esperar(CUMPLE_DELAY_WHATSAPP_MS);
+}
+
+async function enviarCumpleAutomaticoHoy(clienta, fechaClave) {
+    const telClienta = normalizarTelefono(clienta.telefono);
+
+    if (!telClienta) {
+        await enviarWhatsAppSalon(`⚠️ Cumpleaños de *${clienta.nombre}* hoy, pero no hay teléfono en la ficha para enviar el WhatsApp.`);
+        await guardarRegistroCumple(clienta.id, fechaClave, 'sin_telefono');
+        return;
+    }
+
+    const urlClienta = construirUrlWhatsApp(telClienta, mensajeFelicitacionClienta(clienta.nombre));
+    abrirWhatsAppEnlace(urlClienta);
+    await esperar(CUMPLE_DELAY_WHATSAPP_MS);
+
+    await enviarWhatsAppSalon(mensajeRegistroSalon(clienta.nombre));
+
+    await guardarRegistroCumple(clienta.id, fechaClave, 'enviado');
+    await db.clientas.update(clienta.id, { ultimoCumpleFelicitado: parseClaveFecha(fechaClave).getFullYear() });
+}
+
+async function notificarCumpleOmitido(clienta, fechaClave) {
+    await enviarWhatsAppSalon(mensajeCumpleOmitidoSalon(clienta.nombre, fechaClave));
+    await guardarRegistroCumple(clienta.id, fechaClave, 'omitido_avisado');
+}
+
+function obtenerUltimoDiaProcesadoCumple() {
+    return localStorage.getItem(CUMPLE_ULTIMO_DIA_PROCESADO_KEY);
+}
+
+function marcarUltimoDiaProcesadoCumple(fechaClave) {
+    localStorage.setItem(CUMPLE_ULTIMO_DIA_PROCESADO_KEY, fechaClave);
+}
+
+async function procesarCumplesAtrasados(clientas) {
+    const hoyClave = fechaHoyClaveCumple();
+    const ayerClave = ayerClaveCumple();
+    let ultimo = obtenerUltimoDiaProcesadoCumple();
+
+    if (!ultimo) {
+        marcarUltimoDiaProcesadoCumple(ayerClave);
+        return 0;
+    }
+
+    if (ultimo >= ayerClave) return 0;
+
+    let dia = claveFechaSiguiente(ultimo);
+    let avisos = 0;
+
+    while (dia <= ayerClave) {
+        const pendientes = await clientasCumpleEnClaveFecha(dia, clientas);
+        for (const clienta of pendientes) {
+            console.log(`⚠️ Cumple omitido: ${clienta.nombre} (${dia})`);
+            await notificarCumpleOmitido(clienta, dia);
+            avisos++;
+        }
+        marcarUltimoDiaProcesadoCumple(dia);
+        dia = claveFechaSiguiente(dia);
+    }
+
+    return avisos;
+}
+
+async function procesarCumplesHoyAutomatico(clientas) {
+    const hoyClave = fechaHoyClaveCumple();
+    const pendientes = await clientasCumpleEnClaveFecha(hoyClave, clientas);
+
+    if (!pendientes.length) {
+        marcarUltimoDiaProcesadoCumple(hoyClave);
+        return 0;
+    }
+
+    console.log(`🎂 Enviando ${pendientes.length} felicitación(es) automática(s)...`);
+
+    for (const clienta of pendientes) {
+        await enviarCumpleAutomaticoHoy(clienta, hoyClave);
+    }
+
+    marcarUltimoDiaProcesadoCumple(hoyClave);
+    return pendientes.length;
+}
+
+async function procesarCumplesAutomatico(opciones = {}) {
+    const { forzarHoy = false } = opciones;
+
+    if (!appEstaDesbloqueada() || procesandoCumplesAutomatico) return;
+    procesandoCumplesAutomatico = true;
+
+    try {
+        const clientas = await db.clientas.toArray();
+        const avisosAtrasados = await procesarCumplesAtrasados(clientas);
+
+        const puedeEnviarHoy = forzarHoy || (esHoraDeCheckCumple() && !yaSeEjecutoCheckCumpleHoy());
+        let enviadosHoy = 0;
+
+        if (puedeEnviarHoy) {
+            enviadosHoy = await procesarCumplesHoyAutomatico(clientas);
+            if (!forzarHoy) marcarCheckCumpleEjecutadoHoy();
+        }
+
+        if (avisosAtrasados > 0 || enviadosHoy > 0) {
+            console.log(`🎂 Cumpleaños: ${enviadosHoy} enviado(s) hoy, ${avisosAtrasados} aviso(s) de omitidos`);
+        }
+    } catch (error) {
+        console.error('Error en procesamiento automático de cumpleaños:', error);
+    } finally {
+        procesandoCumplesAutomatico = false;
+    }
+}
+
+function fechaHoyClaveCumple() {
+    const d = new Date();
+    const mes = String(d.getMonth() + 1).padStart(2, '0');
+    const dia = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${mes}-${dia}`;
+}
+
+function yaSeEjecutoCheckCumpleHoy() {
+    return localStorage.getItem(CUMPLE_CHECK_STORAGE_PREFIX + fechaHoyClaveCumple()) === '1';
+}
+
+function marcarCheckCumpleEjecutadoHoy() {
+    localStorage.setItem(CUMPLE_CHECK_STORAGE_PREFIX + fechaHoyClaveCumple(), '1');
+}
+
+function esHoraDeCheckCumple() {
+    const ahora = new Date();
+    const minutosActuales = ahora.getHours() * 60 + ahora.getMinutes();
+    const minutosProgramados = CUMPLE_HORA_PROGRAMADA * 60 + CUMPLE_MINUTO_PROGRAMADA;
+    return minutosActuales >= minutosProgramados;
+}
+
+function appEstaDesbloqueada() {
+    const hashGuardado = localStorage.getItem(PIN_STORAGE_KEY);
+    if (!hashGuardado) return true;
+    return sessionStorage.getItem(PIN_SESSION_KEY) === '1';
+}
+
+async function intentarCheckCumpleProgramado(opciones = {}) {
+    await procesarCumplesAutomatico(opciones);
+}
+
+function configurarProgramacionCumpleaños() {
+    if (window._cumpleSchedulerInit) {
+        intentarCheckCumpleProgramado();
+        return;
+    }
+    window._cumpleSchedulerInit = true;
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            intentarCheckCumpleProgramado();
+        }
+    });
+
+    if (intervalCheckCumple) clearInterval(intervalCheckCumple);
+    intervalCheckCumple = setInterval(() => {
+        intentarCheckCumpleProgramado();
+    }, 60000);
+
+    intentarCheckCumpleProgramado();
 }
 
 function pctCambio(actual, anterior) {
@@ -992,56 +1563,9 @@ async function cargarDashboard() {
     }
 }
 
-// Función para comprobar si hoy es el cumpleaños de alguna clienta
+// Comprobación manual o forzada de cumpleaños
 async function checkCumpleaños() {
-    try {
-        const hoy = new Date();
-        const diaHoy = hoy.getDate();
-        const mesHoy = hoy.getMonth() + 1;
-        const añoActual = hoy.getFullYear();
-
-        // Formateamos el día/mes como "D/M" para comparar directamente con el string
-        const hoyStr = `${diaHoy}/${mesHoy}`;
-
-        // 🛡️ MEJORA DE RENDIMIENTO:
-        // En lugar de traer todas, filtramos de forma más eficiente
-        // Buscamos clientas que tengan fecha de nacimiento y cuyo último cumple no sea este año
-        const posibles = await db.clientas
-            .where('fechaNacimiento')
-            .notEqual("")
-            .filter(c => c.ultimoCumpleFelicitado !== añoActual)
-            .toArray();
-        
-        const cumpleañeras = posibles.filter(c => {
-            let diaNac, mesNac;
-
-            // Manejo robusto de formatos (Soporta "1/5" y "2024-05-01")
-            if (c.fechaNacimiento.includes('/')) {
-                const partes = c.fechaNacimiento.split('/');
-                diaNac = parseInt(partes[0]);
-                mesNac = parseInt(partes[1]);
-            } 
-            else if (c.fechaNacimiento.includes('-')) {
-                const f = new Date(c.fechaNacimiento);
-                // Si la fecha es inválida, saltamos
-                if (isNaN(f.getTime())) return false;
-                diaNac = f.getUTCDate(); // Usamos UTC para evitar líos de zona horaria
-                mesNac = f.getUTCMonth() + 1;
-            }
-
-            return diaNac === diaHoy && mesNac === mesHoy;
-        });
-
-        if (cumpleañeras.length > 0) {
-            console.log("🎂 ¡Cumpleaños detectados!", cumpleañeras);
-            
-            // Pasamos añoActual para que la función que muestra la alerta 
-            // pueda marcar a la clienta como "felicitada este año"
-            mostrarAlertaCumple(cumpleañeras, añoActual);
-        }
-    } catch (error) {
-        console.error("Error al comprobar cumpleaños:", error);
-    }
+    await procesarCumplesAutomatico({ forzarHoy: true });
 }
 
 
@@ -1091,7 +1615,7 @@ let citaParaCobrar = null;
 // =========================================
 document.addEventListener('DOMContentLoaded', async () => {
     if (typeof Dexie === 'undefined') {
-        alert('Error: no se pudo cargar la base de datos (Dexie). Comprueba tu conexión a internet y recarga la página.');
+        alert('Error: no se pudo cargar la base de datos (Dexie). Comprueba que la carpeta vendor/ está completa y recarga la página.');
         return;
     }
 
@@ -1100,7 +1624,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     configurarRefrescoPestanas();
 
     // 1. PRIORIDAD MÁXIMA: Interfaz de trabajo
-    initCalendar();
+    try {
+        initCalendar();
+    } catch (error) {
+        console.error('Error inicializando calendario:', error);
+    }
+
+    configurarProgramacionCumpleaños();
+
     listarClientas();
     listarServicios();
     actualizarSelectores();
@@ -1114,9 +1645,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             await cargarHistorialVentas();
         }
     }, 800);
-
-    // 3. Google Calendar: reconectar en silencio si ya se autorizó antes
-    setTimeout(() => intentarReconexionGoogleAutomatica(), 600);
 });
 
 
@@ -1155,28 +1683,10 @@ function initCalendar() {
 
         dateClick: function(info) {
             const modalEl = document.getElementById('modalCita');
-            modalEl.removeAttribute('data-edit-id');
-            
-            // 1. Resetear el formulario
-            const inputs = modalEl.querySelectorAll('input, select');
-            inputs.forEach(i => i.disabled = false);
+            resetModalCitaNueva();
 
-            // --- AQUÍ LAS LÍNEAS QUE FALTABAN PARA LIMPIAR LOS SELECTORES ---
-            document.getElementById('selCli').value = ""; // Limpia la clienta
-            document.getElementById('selSer').value = ""; // Limpia el servicio
-            // ----------------------------------------------------------------
-
+            document.getElementById('selSer').value = "";
             document.getElementById('modalCitaTitulo').textContent = "Nueva Cita";
-            document.getElementById('btnEliminarCita').style.display = 'none';
-            document.getElementById('btnCobrarCita').style.display = 'none';
-            
-            // Buscamos también el botón de desbloqueo si lo tienes para ocultarlo
-            const btnDesbloquear = document.getElementById('btnForzarDesbloqueo');
-            if(btnDesbloquear) btnDesbloquear.style.display = 'none';
-
-            document.querySelector('button[onclick="agendarCita()"]').style.display = 'block';
-
-            // 2. CORRECCIÓN DE HORA (Tu código intacto)
             const d = info.date;
             const año = d.getFullYear();
             const mes = String(d.getMonth() + 1).padStart(2, '0');
@@ -1231,8 +1741,6 @@ function initCalendar() {
         }
     });
     calendar.render();
-
-    checkCumpleaños();
 }
 
 
@@ -1242,16 +1750,14 @@ function initCalendar() {
 async function prepararEdicionCita(id) {
     const modalEl = document.getElementById('modalCita');
     
-    // =========================================================
-    // 1. RESET DE EMERGENCIA (Limpieza total antes de empezar)
-    // =========================================================
-    modalEl.removeAttribute('data-edit-id'); // Borramos el rastro de la cita anterior
-    modalEl.querySelectorAll('input, select').forEach(i => {
-        i.disabled = false; // Desbloqueamos todo
-        i.value = "";       // Vaciamos todo
+    modalEl.removeAttribute('data-edit-id');
+    modalEl.querySelectorAll('input:not([type="hidden"]), select').forEach(i => {
+        i.disabled = false;
+        if (i.id !== 'buscadorCitaClienta') i.value = "";
     });
+    limpiarSelectorClientaCita();
+    setSelectorClientaCitaHabilitado(true);
 
-    // Resetear visibilidad de botones por defecto
     const btnGuardar = modalEl.querySelector('button[onclick="agendarCita()"]');
     const btnEliminar = document.getElementById('btnEliminarCita');
     const btnCobrar = document.getElementById('btnCobrarCita');
@@ -1264,31 +1770,19 @@ async function prepararEdicionCita(id) {
     
     document.getElementById('modalCitaTitulo').textContent = "Nueva Cita";
 
-    // =========================================================
-    // 2. CARGAR LISTAS (Actualizar Selectores)
-    // =========================================================
-    const clientas = await db.clientas.toArray();
-    clientas.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", 'es', { sensitivity: 'base' }));
-    
-    document.getElementById('selCli').innerHTML = '<option value="">--- Selecciona Clienta ---</option>' + 
-        clientas.map(c => `<option value="${c.id}">${escaparHTML(c.nombre)}</option>`).join('');
+    await actualizarSelectores();
 
-    const servicios = await db.servicios.toArray();
-    document.getElementById('selSer').innerHTML = '<option value="">--- Selecciona Servicio ---</option>' + 
-        servicios.map(s => `<option value="${s.id}">${escaparHTML(s.nombre)}</option>`).join('');
-
-    // =========================================================
-    // 3. SI ES EDICIÓN: RELLENAR Y BLOQUEAR SEGÚN CORRESPONDA
-    // =========================================================
     if (id) {
         const cita = await db.agenda.get(parseInt(id));
         if (!cita) return;
 
-        modalEl.setAttribute('data-edit-id', id); // Aquí sí ponemos el ID
+        modalEl.setAttribute('data-edit-id', id);
         
         if (cita.cobrado) {
-            document.getElementById('modalCitaTitulo').textContent = `Cita Finalizada - ${escaparHTML(cita.nombreClienta)}`;
-            modalEl.querySelectorAll('input, select').forEach(i => i.disabled = true);
+            const cli = await db.clientas.get(parseInt(cita.clienteId));
+            document.getElementById('modalCitaTitulo').textContent = `Cita Finalizada - ${escaparHTML(cli?.nombre || 'Clienta')}`;
+            modalEl.querySelectorAll('input:not([type="hidden"]), select').forEach(i => i.disabled = true);
+            setSelectorClientaCitaHabilitado(false);
             if(btnGuardar) btnGuardar.style.display = 'none';
             if(btnEliminar) btnEliminar.style.display = 'none';
             if(btnCobrar) btnCobrar.style.display = 'none';
@@ -1299,16 +1793,12 @@ async function prepararEdicionCita(id) {
             if(btnCobrar) btnCobrar.style.display = 'block';
         }
 
-        // Ponemos los valores de la cita
-        document.getElementById('selCli').value = cita.clienteId;
+        const cli = await db.clientas.get(parseInt(cita.clienteId));
+        seleccionarClientaEnCita(cita.clienteId, cli?.nombre || '');
         document.getElementById('selSer').value = cita.servicioId;
         document.getElementById('citaFecha').value = cita.fecha;
     }
 
-    // =========================================================
-    // 4. MOSTRAR MODAL
-    // =========================================================
-    // Usamos la instancia existente o creamos una nueva
     const modalInstance = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
     modalInstance.show();
 }
@@ -1328,7 +1818,7 @@ async function agendarCita() {
                     ...swalConfig,
                     icon: 'info',
                     title: 'Campos incompletos',
-                    text: 'Por favor, selecciona clienta, servicio y fecha para agendar la cita.',
+                    text: 'Por favor, selecciona una clienta de la lista, un servicio y la fecha.',
                     confirmButtonText: 'Entendido'
                 }); 
         return;
@@ -1365,59 +1855,21 @@ async function agendarCita() {
         }
     }
 
-    const datosCita = {
-        nombreClienta: cliente.nombre,
-        servicio: servicio.nombre,
-        fechaInicio: fecha,
-        fechaFin: new Date(new Date(fecha).getTime() + 60 * 60 * 1000).toISOString()
-    };
-
-    let idFinal;
-
     try {
         // --- OPERACIÓN EN BASE DE DATOS LOCAL ---
         if (editId) {
-            idFinal = parseInt(editId);
-            await db.agenda.update(idFinal, {
+            await db.agenda.update(parseInt(editId), {
                 clienteId: clienteId,
                 servicioId: servicioId,
                 fecha: fecha
             });
         } else {
-            idFinal = await db.agenda.add({
+            await db.agenda.add({
                 clienteId: clienteId,
                 servicioId: servicioId,
                 fecha: fecha,
                 cobrado: false
             });
-        }
-        
-        // --- INTEGRACIÓN CON GOOGLE CALENDAR (solo si ya está conectado) ---
-        if (!estaGoogleConectado() && usuarioQuiereGoogleVinculado()) {
-            try {
-                await asegurarGoogleListo();
-                await renovarTokenGoogleSilencioso();
-            } catch (e) {
-                console.warn('No se pudo renovar Google antes de sincronizar la cita:', e);
-            }
-        }
-
-        if (estaGoogleConectado() && gapi.client?.calendar) {
-            try {
-                const citaActualizada = await db.agenda.get(idFinal);
-
-                if (editId && citaActualizada.googleEventId) {
-                    await actualizarEventoGoogle(citaActualizada.googleEventId, datosCita);
-                } else {
-                    const googleId = await crearEventoGoogle(datosCita);
-                    if (googleId) {
-                        await db.agenda.update(idFinal, { googleEventId: googleId });
-                        console.log("✅ Cita sincronizada en Google");
-                    }
-                }
-            } catch (errorGoogle) {
-                console.error("Error al sincronizar con Google:", errorGoogle);
-            }
         }
 
         // --- FINALIZACIÓN ---
@@ -1457,29 +1909,13 @@ async function eliminarCita() {
     }).then(async (result) => {
         if (result.isConfirmed) {
             try {
-                // --- TU LÓGICA INTACTA DESDE AQUÍ ---
-                const cita = await db.agenda.get(parseInt(id));
-                
                 await db.agenda.delete(parseInt(id));
                 calendar.refetchEvents();
 
                 if (typeof cargarDashboard === 'function') cargarDashboard();
-                
-                // Cerramos el modal sin esperar a Google
+
                 const modalInstance = bootstrap.Modal.getInstance(document.getElementById('modalCita'));
                 if (modalInstance) modalInstance.hide();
-
-                console.log("Cita eliminada visualmente. Procesando en Google en segundo plano...");
-
-                // 3. PROCESO EN SEGUNDO PLANO (Google, solo si conectado)
-                if (cita && cita.googleEventId && estaGoogleConectado()) {
-                    eliminarEventoGoogle(cita.googleEventId).then(() => {
-                        console.log("✅ Borrado en Google completado");
-                    }).catch(err => {
-                        console.error("❌ Falló el borrado en Google, pero ya se quitó de la app:", err);
-                    });
-                }
-                // --- HASTA AQUÍ ---
 
             } catch (error) {
                 console.error("Error al eliminar:", error);
@@ -1488,22 +1924,6 @@ async function eliminarCita() {
             }
         }
     });
-}
-
-// NO OLVIDES añadir esta función de apoyo si no la pusiste antes:
-async function eliminarEventoGoogle(googleEventId) {
-    if (!gapi.client.calendar || !googleEventId) return;
-    try {
-        await gapi.client.calendar.events.delete({
-            'calendarId': 'primary',
-            'eventId': googleEventId
-        });
-        console.log('🗑️ Evento eliminado de Google con éxito');
-    } catch (err) {
-        // Si el evento ya fue borrado manualmente en el móvil, Google dará error 404, 
-        // lo ignoramos porque el objetivo es que ya no esté.
-        console.warn('Aviso: No se pudo borrar en Google (quizás ya no existía)', err);
-    }
 }
 
 // =========================================
@@ -1640,15 +2060,22 @@ async function confirmarCobro() {
         const modalCobroEl = document.getElementById('modalCobro');
         const modalInstance = bootstrap.Modal.getInstance(modalCobroEl);
         if (modalInstance) modalInstance.hide();
+
+        const whatsappAbierto = importeFinal > 0
+            ? await enviarWhatsAppAgradecimientoCobro(citaParaCobrar.clienteId)
+            : false;
         
         // 5. Mensaje de éxito final
+        const textoExito = importeFinal === 0
+            ? 'Sesión de regalo registrada correctamente.'
+            : whatsappAbierto
+                ? `Venta registrada por ${importeFinal}€. Se ha abierto WhatsApp para enviar el agradecimiento a la clienta.`
+                : `Venta registrada por un importe de ${importeFinal}€`;
         Swal.fire({
             ...swalConfig,
             icon: 'success',
             title: '¡Operación Exitosa!',
-            text: importeFinal === 0 
-                ? "Sesión de regalo registrada correctamente." 
-                : `Venta registrada por un importe de ${importeFinal}€`,
+            text: textoExito,
             confirmButtonText: 'Excelente'
         });
         
@@ -1879,12 +2306,16 @@ async function cargarHistorialVentas() {
 // 6. GESTIÓN DE CLIENTAS Y SERVICIOS
 // =========================================
 
-function abrirModalNuevoCliente() {
+function abrirModalNuevoCliente(desdeCita = false) {
     const modalEl = document.getElementById('modalClienta');
     if (!modalEl) return;
 
-    // 1. Limpiamos el ID de edición
     modalEl.removeAttribute('data-edit-id');
+    if (desdeCita) {
+        modalEl.setAttribute('data-desde-cita', '1');
+    } else {
+        modalEl.removeAttribute('data-desde-cita');
+    }
     
     // 2. Reseteamos el título del modal
     const titulo = modalEl.querySelector('.modal-title');
@@ -1911,23 +2342,40 @@ function abrirModalNuevoCliente() {
 }
 
 async function persistirClienta(idEdicion, datos, modalEl) {
+    let idFinal;
     if (idEdicion) {
-        await db.clientas.update(parseInt(idEdicion), datos);
+        idFinal = parseInt(idEdicion);
+        await db.clientas.update(idFinal, datos);
         console.log("Clienta actualizada con éxito");
     } else {
-        await db.clientas.add(datos);
+        idFinal = await db.clientas.add(datos);
         console.log("Nueva clienta añadida con éxito");
     }
 
+    const desdeCita = modalEl.getAttribute('data-desde-cita') === '1';
+    modalEl.removeAttribute('data-desde-cita');
+
     await listarClientas();
-    if (typeof actualizarSelectores === "function") actualizarSelectores();
+    if (typeof actualizarSelectores === "function") await actualizarSelectores();
     if (typeof cargarDashboard === 'function') cargarDashboard();
+
+    if (desdeCita) {
+        omitirReaperturaCitaPorGuardado = true;
+    }
 
     const modalInstance = bootstrap.Modal.getInstance(modalEl);
     if (modalInstance) modalInstance.hide();
 
     document.getElementById('formClienta').reset();
     modalEl.removeAttribute('data-edit-id');
+
+    if (desdeCita) {
+        await reanudarCitaTrasNuevaClienta(idFinal);
+        omitirReaperturaCitaPorGuardado = false;
+        return idFinal;
+    }
+
+    return idFinal;
 }
 
 function construirAdvertenciaDuplicados(nombreRepetido, telRepetido, telefonoIntroducido) {
@@ -2251,23 +2699,24 @@ async function listarClientas() {
     if (!contenedor) return;
 
     const inputBusqueda = document.getElementById('buscadorClientas');
-
-    const limpiarTexto = (texto) => {
-        if (!texto) return "";
-        return texto
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "");
-    };
-
-    const filtro = limpiarTexto(inputBusqueda ? inputBusqueda.value : "");
+    const filtro = normalizarTextoBusqueda(inputBusqueda ? inputBusqueda.value : "");
     const clis = await db.clientas.toArray();
 
-    const clientasFiltradas = clis.filter(c => {
-        const nombreLimpio = limpiarTexto(c.nombre);
-        const telefono = (c.telefono || "");
-        return nombreLimpio.includes(filtro) || telefono.includes(filtro);
-    });
+    const clientasFiltradas = filtrarClientasPorTexto(clis, inputBusqueda ? inputBusqueda.value : "");
+
+    if (filtro) {
+        const clientasOrdenadas = ordenarClientasEnriquecidas(clientasFiltradas.map(c => ({
+            ...c,
+            idLimpio: parseInt(c.id),
+            estado: { actual: 0, porcentaje: 0, tocaRegalo: false },
+            totalHistorico: 0
+        })));
+        actualizarCabeceraOrdenClientas();
+        contenedor.innerHTML = clientasOrdenadas.length
+            ? clientasOrdenadas.map(c => renderFilaClienta(c, true)).join('')
+            : '<p class="text-muted text-center py-3">No hay clientas con ese texto</p>';
+        return;
+    }
 
     const clientasEnriquecidas = await Promise.all(clientasFiltradas.map(async (c) => {
         const idLimpio = parseInt(c.id);
@@ -2287,59 +2736,64 @@ async function listarClientas() {
     const clientasOrdenadas = ordenarClientasEnriquecidas(clientasEnriquecidas);
     actualizarCabeceraOrdenClientas();
 
-    contenedor.innerHTML = clientasOrdenadas.map(c => `
-            <div class="col-12 clienta-fila">
-                <div onclick="abrirDashboardClienta(${c.idLimpio})" 
-                     style="cursor: pointer !important; 
-                            display: flex !important; 
-                            align-items: center !important; 
-                            background: #1a1a1a !important; 
-                            color: white !important;
-                            padding: 3px 15px !important; 
-                            min-height: 42px !important; 
-                            border: 1px solid #c5a059 !important; 
-                            border-left: 6px solid #c5a059 !important; 
-                            border-radius: 12px !important; 
-                            transition: all 0.2s ease;
-                            position: relative;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-                    
-                    <div style="display: flex; width: 100%; align-items: center; gap: 15px;">
-                        <div style="flex: 2.5; min-width: 160px;">
-                            <span style="font-size: 1.15rem !important; font-weight: 700 !important; color: #fcf6ba !important; white-space: nowrap; letter-spacing: 0.3px;">
-                                ${escaparHTML(c.nombre)}
-                            </span>
-                        </div>
+    contenedor.innerHTML = clientasOrdenadas.map(c => renderFilaClienta(c, false)).join('');
+}
 
-                        <div style="flex: 0.8; color: #eec9c3; font-size: 0.75rem; white-space: nowrap; min-width: 70px;">
-                            ${c.fechaNacimiento ? `
-                                <i class="fa-solid fa-cake-candles" style="font-size: 0.65rem; margin-right: 5px;"></i>${escaparHTML(c.fechaNacimiento)}
-                            ` : ''}
-                        </div>
+function renderFilaClienta(c, modoBusqueda = false) {
+    const fidelidadHtml = modoBusqueda
+        ? ''
+        : `<div style="flex: 2; display: flex; align-items: center; gap: 12px; justify-content: flex-end;">
+            <span style="font-size: 0.8rem; font-weight: bold; color: #eee; min-width: 38px; text-align: right;">
+                ${c.estado.actual}/10
+            </span>
+            <div style="width: 75px; background: #000; height: 5px; border-radius: 10px; border: 1px solid #444; overflow: hidden;">
+                <div style="width: ${c.estado.porcentaje}%; background: linear-gradient(90deg, #c5a059, #fcf6ba); height: 100%;"></div>
+            </div>
+            <div style="width: 20px; text-align: center;">
+                ${c.estado.tocaRegalo ? '<i class="fa-solid fa-crown text-warning" style="font-size: 0.9rem; filter: drop-shadow(0 0 3px rgba(255,215,0,0.6));"></i>' : ''}
+            </div>
+        </div>`;
 
-                        <div style="flex: 1; color: #888; font-size: 0.75rem; white-space: nowrap;">
-                            <i class="fa-solid fa-phone" style="font-size: 0.65rem; margin-right: 5px; color: #c5a059;"></i>${escaparHTML(c.telefono || '')}
-                        </div>
+    const visitasHtml = modoBusqueda
+        ? ''
+        : `<div style="width: 55px; text-align: center; border-left: 1px solid #333; border-right: 1px solid #333;">
+            <span style="font-size: 0.95rem; font-weight: bold; color: #ffffff;">${c.totalHistorico}</span>
+        </div>`;
 
-                        <div style="width: 55px; text-align: center; border-left: 1px solid #333; border-right: 1px solid #333;">
-                            <span style="font-size: 0.95rem; font-weight: bold; color: #ffffff;">${c.totalHistorico}</span>
-                        </div>
-
-                        <div style="flex: 2; display: flex; align-items: center; gap: 12px; justify-content: flex-end;">
-                            <span style="font-size: 0.8rem; font-weight: bold; color: #eee; min-width: 38px; text-align: right;">
-                                ${c.estado.actual}/10
-                            </span>
-                            <div style="width: 75px; background: #000; height: 5px; border-radius: 10px; border: 1px solid #444; overflow: hidden;">
-                                <div style="width: ${c.estado.porcentaje}%; background: linear-gradient(90deg, #c5a059, #fcf6ba); height: 100%;"></div>
-                            </div>
-                            <div style="width: 20px; text-align: center;">
-                                ${c.estado.tocaRegalo ? '<i class="fa-solid fa-crown text-warning" style="font-size: 0.9rem; filter: drop-shadow(0 0 3px rgba(255,215,0,0.6));"></i>' : ''}
-                            </div>
-                        </div>
+    return `
+        <div class="col-12 clienta-fila">
+            <div onclick="abrirDashboardClienta(${c.idLimpio})"
+                 style="cursor: pointer !important;
+                        display: flex !important;
+                        align-items: center !important;
+                        background: #1a1a1a !important;
+                        color: white !important;
+                        padding: 3px 15px !important;
+                        min-height: 42px !important;
+                        border: 1px solid #c5a059 !important;
+                        border-left: 6px solid #c5a059 !important;
+                        border-radius: 12px !important;
+                        transition: all 0.2s ease;
+                        position: relative;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                <div style="display: flex; width: 100%; align-items: center; gap: 15px;">
+                    <div style="flex: 2.5; min-width: 160px;">
+                        <span style="font-size: 1.15rem !important; font-weight: 700 !important; color: #fcf6ba !important; white-space: nowrap; letter-spacing: 0.3px;">
+                            ${escaparHTML(c.nombre)}
+                        </span>
                     </div>
+                    <div style="flex: 0.8; color: #eec9c3; font-size: 0.75rem; white-space: nowrap; min-width: 70px;">
+                        ${c.fechaNacimiento ? `<i class="fa-solid fa-cake-candles" style="font-size: 0.65rem; margin-right: 5px;"></i>${escaparHTML(c.fechaNacimiento)}` : ''}
+                    </div>
+                    <div style="flex: 1; color: #888; font-size: 0.75rem; white-space: nowrap;">
+                        <i class="fa-solid fa-phone" style="font-size: 0.65rem; margin-right: 5px; color: #c5a059;"></i>${escaparHTML(c.telefono || '')}
+                    </div>
+                    ${visitasHtml}
+                    ${fidelidadHtml}
                 </div>
             </div>
-        `).join('');
+        </div>
+    `;
 }
 
 async function ejecutarEliminarClienta() {
@@ -2611,24 +3065,13 @@ async function ejecutarEliminarServicio() {
 } 
 
 async function actualizarSelectores() {
-    const clis = await db.clientas.toArray();
+    await cargarCacheClientas();
     const sers = await db.servicios.toArray();
-    
-    // 1. Ordenar clientas alfabéticamente
-    clis.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", 'es', { sensitivity: 'base' }));
+    sers.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", 'es', { sensitivity: 'base' }));
 
-    const selCli = document.getElementById('selCli');
     const selSer = document.getElementById('selSer');
-    
-    if(selCli) {
-        // Añadimos la opción vacía al principio para que no salga ninguna clienta por defecto
-        selCli.innerHTML = '<option value="" disabled selected>--- Selecciona Clienta ---</option>' + 
-            clis.map(c => `<option value="${c.id}">${escaparHTML(c.nombre)}</option>`).join('');
-    }
-
-    if(selSer) {
-        // Añadimos la opción vacía al principio para los servicios
-        selSer.innerHTML = '<option value="" disabled selected>--- Selecciona Servicio ---</option>' + 
+    if (selSer) {
+        selSer.innerHTML = '<option value="" disabled selected>--- Selecciona Servicio ---</option>' +
             sers.map(s => `<option value="${s.id}">${escaparHTML(s.nombre)} (${s.coste}€)</option>`).join('');
     }
 }
@@ -2712,20 +3155,21 @@ async function exportarBackup() {
         });
         if (password === undefined) return;
 
-        const [clientas, servicios, agenda, ventas] = await Promise.all([
+        const [clientas, servicios, agenda, ventas, registroCumples] = await Promise.all([
             db.clientas.toArray(),
             db.servicios.toArray(),
             db.agenda.toArray(),
-            db.ventas.toArray()
+            db.ventas.toArray(),
+            db.registroCumples.toArray()
         ]);
         
         const ahora = new Date();
         const backupData = {
             info: {
                 fecha: ahora.toLocaleString(),
-                totalRegistros: clientas.length + servicios.length + agenda.length + ventas.length
+                totalRegistros: clientas.length + servicios.length + agenda.length + ventas.length + registroCumples.length
             },
-            tablas: { clientas, servicios, agenda, ventas }
+            tablas: { clientas, servicios, agenda, ventas, registroCumples }
         };
 
         let contenidoFinal;
@@ -2794,7 +3238,8 @@ function extraerTablasBackup(contenido) {
         clientas: origen.clientas,
         servicios: origen.servicios,
         agenda: Array.isArray(origen.agenda) ? origen.agenda : [],
-        ventas: Array.isArray(origen.ventas) ? origen.ventas : []
+        ventas: Array.isArray(origen.ventas) ? origen.ventas : [],
+        registroCumples: Array.isArray(origen.registroCumples) ? origen.registroCumples : []
     };
 }
 
@@ -2843,22 +3288,31 @@ function prepararTablasImport(tablas) {
         return reg;
     });
 
-    return { clientas, servicios, agenda, ventas };
+    const registroCumples = (tablas.registroCumples || []).map(r => {
+        const reg = { ...r };
+        if (reg.id != null) reg.id = parseInt(reg.id, 10);
+        if (reg.clienteId != null) reg.clienteId = parseInt(reg.clienteId, 10);
+        return reg;
+    });
+
+    return { clientas, servicios, agenda, ventas, registroCumples };
 }
 
 async function volcarBackupEnBD(tablas) {
     const datos = prepararTablasImport(tablas);
 
-    await db.transaction('rw', db.clientas, db.servicios, db.agenda, db.ventas, async () => {
+    await db.transaction('rw', db.clientas, db.servicios, db.agenda, db.ventas, db.registroCumples, async () => {
         await db.clientas.clear();
         await db.servicios.clear();
         await db.agenda.clear();
         await db.ventas.clear();
+        await db.registroCumples.clear();
 
         if (datos.clientas.length) await db.clientas.bulkPut(datos.clientas);
         if (datos.servicios.length) await db.servicios.bulkPut(datos.servicios);
         if (datos.agenda.length) await db.agenda.bulkPut(datos.agenda);
         if (datos.ventas.length) await db.ventas.bulkPut(datos.ventas);
+        if (datos.registroCumples.length) await db.registroCumples.bulkPut(datos.registroCumples);
     });
 }
 
@@ -2969,9 +3423,11 @@ async function actualizarSugerenciasLocalidad() {
 }
 
 
-function mostrarAlertaCumple(cumpleañeras) {
+function mostrarAlertaCumple(cumpleañeras, añoActual = new Date().getFullYear()) {
     const modalEl = document.getElementById('modalCumple');
-    const modal = new bootstrap.Modal(modalEl);
+    if (!modalEl) return;
+
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
     const listaTexto = document.getElementById('listaCumplesTexto');
     const contenedorBotones = document.getElementById('contenedorBotonesCumple');
     
@@ -2982,8 +3438,7 @@ function mostrarAlertaCumple(cumpleañeras) {
     contenedorBotones.innerHTML = ''; 
 
     cumpleañeras.forEach(c => {
-        const añoActual = new Date().getFullYear();
-        const yaFelicitada = c.ultimoCumpleFelicitado === añoActual;
+        const yaFelicitada = yaFelicitadaCumpleEsteAno(c, añoActual);
         
         const divFila = document.createElement('div');
         divFila.className = 'mb-4 p-3 border border-gold rounded bg-black text-white'; 
@@ -3006,9 +3461,13 @@ function mostrarAlertaCumple(cumpleañeras) {
             btn.className = 'btn btn-secondary w-100 mt-2';
             btn.innerHTML = '✅ Completado';
             btn.disabled = true;
+        } else if (!normalizarTelefono(c.telefono)) {
+            btn.className = 'btn btn-outline-warning w-100';
+            btn.innerHTML = '⚠️ Sin teléfono en ficha';
+            btn.disabled = true;
         } else {
             btn.className = 'btn btn-success w-100';
-            btn.innerHTML = '<i class="bi bi-whatsapp"></i> 1. Enviar a Clienta';
+            btn.innerHTML = '<i class="fa-brands fa-whatsapp"></i> 1. Enviar a Clienta';
             btn.setAttribute('data-paso', '1');
             btn.onclick = function() {
                 enviarWhatsAppCumple(c.telefono, c.nombre, c.id);
@@ -3024,13 +3483,15 @@ function mostrarAlertaCumple(cumpleañeras) {
 function enviarWhatsAppCumple(telefono, nombre, id) {
     const miTelefono = "615821328"; 
     const boton = document.getElementById('btn-cumple-' + id);
+    if (!boton) return;
+
     const paso = boton.getAttribute('data-paso');
+    const telClienta = normalizarTelefono(telefono);
 
     if (paso === '2') {
         const mensajeParaMi = "✅ Registro: Regalo enviado a *" + nombre + "*";
         window.open("https://wa.me/34" + miTelefono + "?text=" + encodeURIComponent(mensajeParaMi), '_blank');
         
-        // Guardamos el año en la base de datos
         db.clientas.update(id, { ultimoCumpleFelicitado: new Date().getFullYear() });
 
         boton.innerHTML = "✅ Completado";
@@ -3038,10 +3499,21 @@ function enviarWhatsAppCumple(telefono, nombre, id) {
         boton.disabled = true;
         document.getElementById('fila-cumple-' + id).style.opacity = '0.4';
     } else {
-        const mensajeClienta = "¡Hola " + nombre + "! 🎂 Desde Eli·GR Nails te deseamos un muy feliz cumpleaños. ✨ Tenemos un regalito especial para ti en el salón, ¡pásate a vernos cuando quieras!";
-        window.open("https://wa.me/34" + telefono + "?text=" + encodeURIComponent(mensajeClienta), '_blank');
+        if (!telClienta) {
+            Swal.fire({
+                ...swalConfig,
+                icon: 'warning',
+                title: 'Sin teléfono',
+                text: 'Añade un teléfono válido a la ficha de la clienta para enviar el WhatsApp.',
+                confirmButtonText: 'Entendido'
+            });
+            return;
+        }
 
-        boton.innerHTML = "2. Registrar en MI WhatsApp";
+        const mensajeClienta = "¡Hola " + nombre + "! 🎂 Desde Eli·GR Nails te deseamos un muy feliz cumpleaños. ✨ Tenemos un regalito especial para ti en el salón, ¡pásate a vernos cuando quieras!";
+        window.open("https://wa.me/34" + telClienta + "?text=" + encodeURIComponent(mensajeClienta), '_blank');
+
+        boton.innerHTML = '<i class="fa-brands fa-whatsapp"></i> 2. Registrar en MI WhatsApp';
         boton.className = "btn btn-info w-100 text-white mt-2"; 
         boton.setAttribute('data-paso', '2');
     }
@@ -3177,370 +3649,4 @@ async function renderizarGraficos(ventas) {
         data: { labels: ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"], datasets: configurarDatasets(miosMes, lomaMes, totalMes) },
         options: opciones
     });
-}
-
-//Lógica para el calendario de Gmail
-async function crearEventoGoogle(cita, opciones = {}) {
-    const silencioso = opciones.silencioso === true;
-
-    if (!gapi.client.calendar) {
-        if (!silencioso) console.error("Google Calendar no está listo");
-        return;
-    }
-
-    try {
-        // Aseguramos que las fechas sean objetos Date antes de convertirlas a ISO
-        const inicioISO = new Date(cita.fechaInicio).toISOString();
-        const finISO = new Date(cita.fechaFin).toISOString();
-
-        const evento = {
-            'summary': `💅 ${cita.nombreClienta}`,
-            'description': `Servicio: ${cita.servicio}`,
-            'start': {
-                'dateTime': inicioISO,
-                'timeZone': 'Europe/Madrid'
-            },
-            'end': {
-                'dateTime': finISO,
-                'timeZone': 'Europe/Madrid'
-            }
-        };
-
-        const response = await gapi.client.calendar.events.insert({
-            'calendarId': 'primary',
-            'resource': evento,
-        });
-
-        console.log('✅ Evento creado en Google Calendar: ' + response.result.htmlLink);
-        return response.result.id;
-    } catch (err) {
-        console.error('❌ Error creando evento en Google:', err);
-        if (err.status === 401) {
-            const renovado = await renovarTokenGoogleSilencioso();
-            if (renovado) return crearEventoGoogle(cita, opciones);
-            if (!silencioso) {
-                Swal.fire({
-                    ...swalConfig,
-                    icon: 'error',
-                    title: 'Sesión de Google caducada',
-                    text: 'Pulsa el icono de Google para reconectar.',
-                    confirmButtonText: 'Entendido'
-                });
-            }
-        }
-    }
-}
-
-
-// Google Calendar — reconexión automática si el usuario ya autorizó antes
-const GOOGLE_GSI_URL = 'https://accounts.google.com/gsi/client';
-const GOOGLE_GAPI_URL = 'https://apis.google.com/js/api.js';
-const GOOGLE_VINCULADO_KEY = 'eligr_google_calendar_vinculado';
-let googleCargaPromesa = null;
-let googleReconexionEnCurso = false;
-
-function usuarioQuiereGoogleVinculado() {
-    return localStorage.getItem(GOOGLE_VINCULADO_KEY) === '1';
-}
-
-function marcarGoogleVinculado() {
-    localStorage.setItem(GOOGLE_VINCULADO_KEY, '1');
-}
-
-function limpiarGoogleVinculado() {
-    localStorage.removeItem(GOOGLE_VINCULADO_KEY);
-}
-
-function cargarScriptExterno(src) {
-    return new Promise((resolve, reject) => {
-        if (document.querySelector(`script[src="${src}"]`)) {
-            resolve();
-            return;
-        }
-        const script = document.createElement('script');
-        script.src = src;
-        script.async = true;
-        script.onload = () => resolve();
-        script.onerror = () => reject(new Error(`No se pudo cargar ${src}`));
-        document.head.appendChild(script);
-    });
-}
-
-async function asegurarGoogleListo() {
-    if (googleCargaPromesa) return googleCargaPromesa;
-
-    googleCargaPromesa = (async () => {
-        await cargarScriptExterno(GOOGLE_GSI_URL);
-        await cargarScriptExterno(GOOGLE_GAPI_URL);
-
-        await new Promise((resolve, reject) => {
-            if (typeof gapi === 'undefined') {
-                reject(new Error('Google API no disponible'));
-                return;
-            }
-            gapi.load('client', resolve);
-        });
-
-        await gapi.client.init({ discoveryDocs: [DISCOVERY_DOC] });
-        gapiInited = true;
-
-        if (!gsiInited && typeof google !== 'undefined') {
-            inicializarGoogle();
-        }
-    })();
-
-    return googleCargaPromesa;
-}
-
-function inicializarGoogle() {
-    tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: SCOPES,
-        callback: async (tokenResponse) => {
-            googleReconexionEnCurso = false;
-            if (tokenResponse.error) {
-                console.warn("Google OAuth:", tokenResponse.error);
-                actualizarBotonGoogle(false);
-                if (window._googleAuthManual) {
-                    mostrarErrorGoogleOAuth(tokenResponse.error);
-                }
-                window._googleAuthManual = false;
-                if (window._googleTokenWaiter) {
-                    window._googleTokenWaiter(false);
-                    window._googleTokenWaiter = null;
-                }
-                return;
-            }
-            if (tokenResponse && tokenResponse.access_token) {
-                gapi.client.setToken(tokenResponse);
-                marcarGoogleVinculado();
-                console.log("✅ Google Calendar conectado");
-                actualizarBotonGoogle(true);
-                await sincronizarCitasPendientesGoogle();
-            }
-            window._googleAuthManual = false;
-            if (window._googleTokenWaiter) {
-                window._googleTokenWaiter(true);
-                window._googleTokenWaiter = null;
-            }
-        },
-        error_callback: (err) => {
-            googleReconexionEnCurso = false;
-            console.warn("Google OAuth error:", err);
-            actualizarBotonGoogle(false);
-            if (window._googleAuthManual) {
-                mostrarErrorGoogleOAuth(err?.type || 'unknown');
-            }
-            window._googleAuthManual = false;
-            if (window._googleTokenWaiter) {
-                window._googleTokenWaiter(false);
-                window._googleTokenWaiter = null;
-            }
-        },
-    });
-    gsiInited = true;
-}
-
-function mostrarErrorGoogleOAuth(codigo) {
-    const origen = window.location.origin;
-    Swal.fire({
-        ...swalConfig,
-        icon: 'info',
-        title: 'Google Calendar no conectado',
-        html: `
-            <p style="text-align:left;font-size:0.9rem;">
-                No se pudo autorizar desde <strong>${escaparHTML(origen)}</strong>.
-            </p>
-            <p style="text-align:left;font-size:0.85rem;color:#aaa;">
-                Si usas Live Server o XAMPP, hay que registrar ese origen en
-                <strong>Google Cloud Console → Credenciales → Orígenes JavaScript autorizados</strong>:
-            </p>
-            <ul style="text-align:left;font-size:0.85rem;">
-                <li><code>http://localhost</code> (XAMPP)</li>
-                <li><code>http://127.0.0.1:5500</code> (Live Server)</li>
-                <li><code>http://localhost:5500</code> (Live Server alternativo)</li>
-            </ul>
-            <p style="text-align:left;font-size:0.8rem;color:#888;">Código: ${escaparHTML(String(codigo))}</p>
-        `,
-        confirmButtonText: 'Entendido'
-    });
-}
-
-function solicitarTokenGoogle(manual = false) {
-    if (!tokenClient) {
-        if (manual) {
-            Swal.fire({
-                ...swalConfig,
-                icon: 'error',
-                title: 'Google aún no está listo',
-                text: 'Espera un segundo y vuelve a pulsar el botón de Google.',
-                confirmButtonText: 'Entendido'
-            });
-        }
-        return;
-    }
-    window._googleAuthManual = manual;
-    if (!manual) actualizarBotonGoogle(null, true);
-    tokenClient.requestAccessToken({ prompt: manual ? '' : '' });
-}
-
-async function renovarTokenGoogleSilencioso() {
-    if (!usuarioQuiereGoogleVinculado() || !tokenClient) return false;
-    if (estaGoogleConectado()) return true;
-
-    return new Promise((resolve) => {
-        window._googleTokenWaiter = resolve;
-        solicitarTokenGoogle(false);
-        setTimeout(() => {
-            if (window._googleTokenWaiter) {
-                window._googleTokenWaiter(false);
-                window._googleTokenWaiter = null;
-            }
-        }, 12000);
-    });
-}
-
-async function intentarReconexionGoogleAutomatica() {
-    if (!usuarioQuiereGoogleVinculado() || estaGoogleConectado() || googleReconexionEnCurso) return;
-
-    googleReconexionEnCurso = true;
-    try {
-        await asegurarGoogleListo();
-        solicitarTokenGoogle(false);
-    } catch (error) {
-        googleReconexionEnCurso = false;
-        console.warn('Reconexión automática con Google:', error);
-        actualizarBotonGoogle(false);
-    }
-}
-
-async function construirDatosCitaDesdeAgenda(cita) {
-    const cliente = await db.clientas.get(parseInt(cita.clienteId));
-    const servicio = await db.servicios.get(parseInt(cita.servicioId));
-    if (!cliente || !servicio) return null;
-
-    const fecha = cita.fecha;
-    return {
-        nombreClienta: cliente.nombre,
-        servicio: servicio.nombre,
-        fechaInicio: fecha,
-        fechaFin: new Date(new Date(fecha).getTime() + 60 * 60 * 1000).toISOString()
-    };
-}
-
-async function sincronizarCitasPendientesGoogle() {
-    if (!estaGoogleConectado() || !gapi.client.calendar) return;
-
-    const citas = await db.agenda.toArray();
-    const pendientes = citas.filter(c => !c.googleEventId);
-    if (!pendientes.length) return;
-
-    console.log(`📤 Sincronizando ${pendientes.length} cita(s) pendientes con Google Calendar...`);
-    let sincronizadas = 0;
-
-    for (const cita of pendientes) {
-        try {
-            const datosCita = await construirDatosCitaDesdeAgenda(cita);
-            if (!datosCita) continue;
-
-            const googleId = await crearEventoGoogle(datosCita, { silencioso: true });
-            if (googleId) {
-                await db.agenda.update(cita.id, { googleEventId: googleId });
-                sincronizadas++;
-            }
-        } catch (err) {
-            console.warn('No se pudo sincronizar cita', cita.id, err);
-        }
-    }
-
-    if (sincronizadas > 0 && typeof calendar !== 'undefined' && calendar) {
-        calendar.refetchEvents();
-    }
-
-    console.log(`✅ ${sincronizadas} cita(s) enviadas a Google Calendar`);
-}
-
-function estaGoogleConectado() {
-    return typeof gapi !== 'undefined'
-        && gapi.client
-        && typeof gapi.client.getToken === 'function'
-        && gapi.client.getToken() !== null;
-}
-
-function actualizarBotonGoogle(conectado, conectando = false) {
-    const btn = document.getElementById('btnConectarGoogle');
-    if (!btn) return;
-
-    btn.classList.remove('connected', 'connecting');
-
-    if (conectando) {
-        btn.classList.add('connecting');
-        btn.title = 'Conectando con Google Calendar...';
-        return;
-    }
-
-    if (conectado) {
-        btn.classList.add('connected');
-        btn.title = 'Google Calendar conectado (pulsa para desconectar)';
-    } else {
-        btn.title = usuarioQuiereGoogleVinculado()
-            ? 'Google Calendar desconectado — pulsa para reconectar'
-            : 'Conectar con Google Calendar (solo una vez)';
-    }
-}
-
-async function manejarAuthClick() {
-    if (estaGoogleConectado()) {
-        const { isConfirmed } = await Swal.fire({
-            ...swalConfig,
-            icon: 'question',
-            title: '¿Desconectar Google Calendar?',
-            text: 'Las citas seguirán en la app, pero no se sincronizarán con Google hasta que vuelvas a conectar.',
-            showCancelButton: true,
-            confirmButtonText: 'Sí, desconectar',
-            cancelButtonText: 'Cancelar'
-        });
-        if (isConfirmed) {
-            const token = gapi.client.getToken();
-            if (token?.access_token && google?.accounts?.oauth2?.revoke) {
-                google.accounts.oauth2.revoke(token.access_token, () => {});
-            }
-            gapi.client.setToken(null);
-            limpiarGoogleVinculado();
-            actualizarBotonGoogle(false);
-        }
-        return;
-    }
-
-    try {
-        await asegurarGoogleListo();
-        solicitarTokenGoogle(true);
-    } catch (error) {
-        console.error('Error cargando Google:', error);
-        Swal.fire({
-            ...swalConfig,
-            icon: 'error',
-            title: 'Google Calendar no disponible',
-            text: 'Comprueba tu conexión a internet e inténtalo de nuevo.',
-            confirmButtonText: 'Entendido'
-        });
-    }
-}
-
-async function actualizarEventoGoogle(googleEventId, datos) {
-    if (!gapi.client.calendar || !googleEventId) return;
-    try {
-        await gapi.client.calendar.events.patch({
-            'calendarId': 'primary',
-            'eventId': googleEventId,
-            'resource': {
-                'summary': `${datos.nombreClienta} - ${datos.servicio}`,
-                'start': { 'dateTime': new Date(datos.fechaInicio).toISOString() },
-                'end': { 'dateTime': datos.fechaFin }
-            }
-        });
-        console.log('✅ Evento actualizado en Google con éxito');
-    } catch (err) {
-        console.error('❌ Error al actualizar en Google:', err);
-    }
 }

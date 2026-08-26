@@ -11,17 +11,14 @@
     <meta name="mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Eli-GR Nails">
     <link rel="shortcut icon" sizes="196x196" href="logo_salon.png">
-    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <link href="vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
+    <link rel="stylesheet" href="vendor/fonts/fonts.css">
+    <link rel="stylesheet" href="vendor/sweetalert2/dark.css">
     <link rel="stylesheet" href="style.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@sweetalert2/theme-dark@5/dark.css">
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.js"></script>
+    <script src="vendor/chart.js/chart.umd.min.js"></script>
+    <script src="vendor/chartjs-plugin-datalabels/chartjs-plugin-datalabels.min.js"></script>
+    <script src="vendor/sweetalert2/sweetalert2.min.js"></script>
 </head>
 <body>
 
@@ -32,16 +29,6 @@
             <span>Eli·GR Nails</span>
         </a>
         
-        <button 
-            id="btnConectarGoogle" 
-            class="btn-google-sync icon-only" 
-            type="button" 
-            title="Conectar con Google Calendar (opcional)"
-            aria-label="Sincronizar con Google Calendar">
-            <i class="fab fa-google"></i>
-            <span class="status-dot"></span>
-        </button>
-
         <button class="navbar-toggler border-0" type="button" 
                 data-bs-toggle="collapse" data-bs-target="#navbarNav" 
                 aria-label="Abrir menú de navegación" title="Abrir menú">
@@ -185,8 +172,7 @@
                 <input type="text" 
                     id="buscadorClientas" 
                     class="form-control bg-dark text-white border-gold" 
-                    placeholder="🔍 Buscar clienta por nombre o teléfono..." 
-                    onkeyup="listarClientas()">
+                    placeholder="🔍 Buscar clienta por nombre o teléfono...">
             </div>
             <div id="cabeceraClientas" class="clientas-cabecera mb-2" aria-label="Ordenar listado de clientas">
                 <button type="button" class="clientas-cabecera-btn active" data-sort="nombre" data-label="Nombre">
@@ -286,7 +272,23 @@
             <div class="modal-body p-4">
                 <div class="mb-3">
                     <label class="label-custom">Clienta</label>
-                    <select id="selCli" class="form-select"></select>
+                    <div class="clienta-combobox" id="comboboxClientaCita">
+                        <input type="hidden" id="selCli" value="">
+                        <div class="input-group">
+                            <input type="text"
+                                id="buscadorCitaClienta"
+                                class="form-control"
+                                placeholder="Escribe nombre o teléfono..."
+                                autocomplete="off">
+                            <button type="button"
+                                id="btnNuevaClientaDesdeCita"
+                                class="btn btn-outline-gold"
+                                title="Añadir nueva clienta">
+                                <i class="fa-solid fa-user-plus"></i>
+                            </button>
+                        </div>
+                        <div id="listaCitaClientas" class="clienta-combobox-list"></div>
+                    </div>
                 </div>
                 <div class="mb-3">
                     <label class="label-custom">Servicio</label>
@@ -320,7 +322,7 @@
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content bg-dark border-gold">
             <div class="modal-header border-gold">
-                <h5 class="modal-title text-gold"><i class="bi bi-cake2"></i> ¡Cumpleaños de Hoy!</h5>
+                <h5 class="modal-title text-gold"><i class="fa-solid fa-cake-candles"></i> ¡Cumpleaños de Hoy!</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body text-white">
@@ -507,9 +509,9 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
+<script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+<script src="vendor/fullcalendar/index.global.min.js"></script>
+<script src="vendor/dexie/dexie.min.js"></script>
 <script src="app.js"></script>
 
 </body>

@@ -1026,70 +1026,69 @@ canvas {
 }
 
 
-/* CSS para botón de sincronizar */
-/* Contenedor del botón circular */
-.btn-google-sync.icon-only {
+/* Combobox clienta en modal de cita */
+.clienta-combobox {
     position: relative;
-    width: 35px;
-    height: 35px;
-    padding: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background-color: #1a1a1a;
-    border: 1px solid #555;
-    color: #888;
-    border-radius: 50%;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    vertical-align: middle;
-    margin-left: 15px;
 }
 
-.btn-google-sync.connecting {
-    border-color: #c5a059;
-    color: #c5a059;
-}
-
-.btn-google-sync.connecting .status-dot {
-    background-color: #c5a059;
-    animation: google-pulse 1s ease-in-out infinite;
-}
-
-@keyframes google-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
-}
-
-/* Icono G de Google */
-.btn-google-sync.icon-only i {
-    font-size: 16px;
-}
-
-/* El punto de estado (pequeño y en la esquina) */
-.status-dot {
+.clienta-combobox-list {
+    display: none;
     position: absolute;
-    bottom: -1px;
-    right: -1px;
-    width: 10px;
-    height: 10px;
-    background-color: #555; /* Gris cuando no hay conexión */
-    border: 2px solid #1a1a1a; /* Para que resalte sobre el círculo */
-    border-radius: 50%;
+    left: 0;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 1060;
+    max-height: 220px;
+    overflow-y: auto;
+    background: #1a1a1a;
+    border: 1px solid #c5a059;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
-/* Cuando está CONECTADO */
-.btn-google-sync.connected {
-    border-color: #4CAF50;
-    color: #4CAF50;
+.clienta-combobox-list.open {
+    display: block;
 }
 
-.btn-google-sync.connected .status-dot {
-    background-color: #4CAF50; /* Verde */
-    box-shadow: 0 0 5px #4CAF50;
+.clienta-combobox-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 10px 14px;
+    border: none;
+    background: transparent;
+    color: #eee;
+    text-align: left;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* Quitar cualquier estilo antiguo que pusimos antes por JS */
-#btnConectarGoogle {
-    background-image: none !important;
+.clienta-combobox-item:hover,
+.clienta-combobox-item:focus {
+    background: rgba(197, 160, 89, 0.12);
+    outline: none;
+}
+
+.clienta-combobox-item .item-nombre {
+    font-weight: 600;
+    color: #fcf6ba;
+}
+
+.clienta-combobox-item .item-tel {
+    font-size: 0.8rem;
+    color: #888;
+    white-space: nowrap;
+}
+
+.clienta-combobox-empty,
+.clienta-combobox-more {
+    padding: 10px 14px;
+    font-size: 0.82rem;
+    color: #888;
+}
+
+#btnNuevaClientaDesdeCita {
+    min-width: 44px;
 }
