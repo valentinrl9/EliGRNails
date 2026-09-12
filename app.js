@@ -795,21 +795,60 @@ function mensajeCumpleOmitidoSalon(nombre, fechaClave) {
     return `⚠️ Aviso Eli·GR: El cumpleaños de *${nombre}* (${d}/${m}/${y}) pasó sin enviar el WhatsApp de felicitación. Revisa la ficha de la clienta.`;
 }
 
-function mensajeAgradecimientoPostCobro(nombre) {
-    return `Hola ${nombre}, gracias por venir a Eli·GR Nails ✨
-Ha sido un placer atenderte. Si quieres, y no lo has hecho aún, puedes dejarnos tu opinión en Google — nos ayuda un montón: ${GOOGLE_REVIEW_URL}
-También puedes seguirnos en Instagram: ${INSTAGRAM_HANDLE}
-¡Te esperamos pronto!`;
+function obtenerOpcionesWhatsAppCobro() {
+    return {
+        agradecimiento: document.getElementById('cobroWaAgradecimiento')?.checked === true,
+        resena: document.getElementById('cobroWaResena')?.checked === true,
+        instagram: document.getElementById('cobroWaInstagram')?.checked === true
+    };
 }
 
-async function enviarWhatsAppAgradecimientoCobro(clienteId) {
+function resetearOpcionesWhatsAppCobro() {
+    const agradecimiento = document.getElementById('cobroWaAgradecimiento');
+    const resena = document.getElementById('cobroWaResena');
+    const instagram = document.getElementById('cobroWaInstagram');
+    if (agradecimiento) agradecimiento.checked = true;
+    if (resena) resena.checked = false;
+    if (instagram) instagram.checked = false;
+}
+
+function mensajePostCobro(nombre, opciones) {
+    const { agradecimiento, resena, instagram } = opciones;
+    if (!agradecimiento && !resena && !instagram) return null;
+
+    const lineas = [`Hola ${nombre},`];
+
+    if (agradecimiento) {
+        lineas.push('gracias por venir a Eli·GR Nails ✨');
+        lineas.push('Ha sido un placer atenderte.');
+    }
+
+    if (resena) {
+        lineas.push(`Si quieres, y no lo has hecho aún, puedes dejarnos tu opinión en Google — nos ayuda un montón: ${GOOGLE_REVIEW_URL}`);
+    }
+
+    if (instagram) {
+        const introInstagram = agradecimiento || resena
+            ? 'También puedes seguirnos en Instagram:'
+            : 'Puedes seguirnos en Instagram:';
+        lineas.push(`${introInstagram} ${INSTAGRAM_HANDLE}`);
+    }
+
+    lineas.push('¡Te esperamos pronto!');
+    return lineas.join('\n');
+}
+
+async function enviarWhatsAppPostCobro(clienteId, opciones) {
     const clienta = await db.clientas.get(parseInt(clienteId, 10));
-    if (!clienta || esPerfilEspecial(clienta.nombre)) return false;
+    if (!clienta || esPerfilEspecial(clienta.nombre)) return 'sin_clienta';
 
-    const url = construirUrlWhatsApp(clienta.telefono, mensajeAgradecimientoPostCobro(clienta.nombre));
-    if (!url) return false;
+    const texto = mensajePostCobro(clienta.nombre, opciones);
+    if (!texto) return 'omitido';
 
-    return abrirWhatsAppEnlace(url);
+    const url = construirUrlWhatsApp(clienta.telefono, texto);
+    if (!url) return 'sin_telefono';
+
+    return abrirWhatsAppEnlace(url) ? 'enviado' : 'error';
 }
 
 function construirUrlWhatsApp(telefono, mensaje) {
@@ -1970,7 +2009,8 @@ async function iniciarCobro() {
     
     // 4. RELLENAR EL INPUT CON EL PRECIO DEL NUEVO SERVICIO
     document.getElementById('inputImporteFinal').value = servicioReal.coste;
-    
+    resetearOpcionesWhatsAppCobro();
+
     // 5. CAMBIO DE MODALES
     const modalCita = bootstrap.Modal.getInstance(document.getElementById('modalCita'));
     if (modalCita) modalCita.hide();
@@ -2061,16 +2101,24 @@ async function confirmarCobro() {
         const modalInstance = bootstrap.Modal.getInstance(modalCobroEl);
         if (modalInstance) modalInstance.hide();
 
-        const whatsappAbierto = importeFinal > 0
-            ? await enviarWhatsAppAgradecimientoCobro(citaParaCobrar.clienteId)
-            : false;
+        let textoExito = importeFinal === 0
+            ? 'Sesión de regalo registrada correctamente.'
+            : `Venta registrada por un importe de ${importeFinal}€`;
+
+        if (importeFinal > 0) {
+            const opcionesWa = obtenerOpcionesWhatsAppCobro();
+            const resultadoWa = await enviarWhatsAppPostCobro(citaParaCobrar.clienteId, opcionesWa);
+
+            if (resultadoWa === 'enviado') {
+                textoExito = `Venta registrada por ${importeFinal}€. Se ha abierto WhatsApp con el mensaje seleccionado.`;
+            } else if (resultadoWa === 'omitido') {
+                textoExito = `Venta registrada por ${importeFinal}€. No se envió WhatsApp (ninguna opción marcada).`;
+            } else if (resultadoWa === 'sin_telefono') {
+                textoExito = `Venta registrada por ${importeFinal}€. No se pudo abrir WhatsApp: la clienta no tiene teléfono en la ficha.`;
+            }
+        }
         
         // 5. Mensaje de éxito final
-        const textoExito = importeFinal === 0
-            ? 'Sesión de regalo registrada correctamente.'
-            : whatsappAbierto
-                ? `Venta registrada por ${importeFinal}€. Se ha abierto WhatsApp para enviar el agradecimiento a la clienta.`
-                : `Venta registrada por un importe de ${importeFinal}€`;
         Swal.fire({
             ...swalConfig,
             icon: 'success',

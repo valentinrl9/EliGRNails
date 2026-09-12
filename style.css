@@ -1026,6 +1026,20 @@ canvas {
 }
 
 
+.cobro-whatsapp-opciones .form-check {
+    margin-bottom: 0.35rem;
+}
+
+.cobro-whatsapp-opciones .form-check-label {
+    font-size: 0.9rem;
+    color: #ccc;
+}
+
+.cobro-whatsapp-opciones .form-check-input:checked {
+    background-color: var(--dorado);
+    border-color: var(--dorado);
+}
+
 /* Combobox clienta en modal de cita */
 .clienta-combobox {
     position: relative;
