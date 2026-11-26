@@ -184,6 +184,11 @@ body {
     color: var(--dorado) !important;
 }
 
+#historialPendinails {
+    max-height: 150px;
+    overflow-y: auto;
+}
+
 /* =========================================
    5. LISTAS Y TABLAS DE VENTAS
    ========================================= */

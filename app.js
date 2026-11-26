@@ -16,6 +16,46 @@ db.version(3).stores({
     });
 });
 
+// Ventas de producto. Van aparte de las citas para no contar como sesión de fidelidad.
+db.version(4).stores({
+    ventasPendinails: "++id, clienteId, fecha"
+});
+
+function escaparHtml(texto) {
+    return String(texto ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function formatearEuros(importe) {
+    return `${(Number(importe) || 0).toFixed(2)}€`;
+}
+
+function formatearFechaCorta(fecha) {
+    return new Date(fecha).toLocaleString("es-ES", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit"
+    });
+}
+
+function cerrarModal(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const modal = bootstrap.Modal.getInstance(el) || bootstrap.Modal.getOrCreateInstance(el);
+    const ocultar = () => {
+        if (!modal._isTransitioning) modal.hide();
+    };
+    if (modal._isTransitioning) {
+        el.addEventListener("shown.bs.modal", ocultar, { once: true });
+    } else {
+        ocultar();
+    }
+}
+
 // Función para comprobar si hoy es el cumpleaños de alguna clienta
 async function checkCumpleaños() {
     try {
@@ -440,37 +480,231 @@ async function revertirCobro(ventaId, citaId) {
 }
 
 async function cargarHistorialVentas() {
-    const ventas = await db.ventas.orderBy('fecha').reverse().toArray();
     const tabla = document.getElementById('tablaVentasBody');
-    let totalAcumulado = 0;
+    if (!tabla) return;
 
-    const filasHTML = await Promise.all(ventas.map(async (v) => {
-        const cli = await db.clientas.get(v.clienteId);
-        const ser = await db.servicios.get(v.servicioId);
-        totalAcumulado += v.importe;
-        
-        const fechaFormateada = new Date(v.fecha).toLocaleString('es-ES', {
-            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
-        });
+    const [ventas, pendinails, clientas, servicios] = await Promise.all([
+        db.ventas.toArray(),
+        db.ventasPendinails.toArray(),
+        db.clientas.toArray(),
+        db.servicios.toArray()
+    ]);
+
+    const nombreClienta = new Map(clientas.map(c => [c.id, c.nombre]));
+    const nombreServicio = new Map(servicios.map(s => [s.id, s.nombre]));
+
+    const lineas = [
+        ...ventas.map(v => ({
+            tipo: "servicio",
+            id: v.id,
+            citaId: v.citaId,
+            fecha: v.fecha,
+            clienta: nombreClienta.get(v.clienteId) || "Eliminada",
+            concepto: nombreServicio.get(v.servicioId) || "Eliminado",
+            metodoPago: v.metodoPago,
+            importe: Number(v.importe) || 0
+        })),
+        ...pendinails.map(p => ({
+            tipo: "producto",
+            id: p.id,
+            fecha: p.fecha,
+            clienta: p.clienteId ? (nombreClienta.get(p.clienteId) || "Eliminada") : "Cliente varios",
+            concepto: `Pendinails × ${p.cantidad}`,
+            metodoPago: p.metodoPago,
+            importe: Number(p.importe) || 0
+        }))
+    ];
+
+    lineas.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+    let totalServicios = 0;
+    let totalProductos = 0;
+
+    const filasHTML = lineas.map(v => {
+        if (v.tipo === "producto") totalProductos += v.importe;
+        else totalServicios += v.importe;
+
+        const accion = v.tipo === "producto"
+            ? `<button class="btn btn-sm btn-outline-danger" onclick="anularVentaPendinails(${v.id})">
+                    <i class="fa-solid fa-rotate-left"></i> Anular
+               </button>`
+            : `<button class="btn btn-sm btn-outline-danger" onclick="revertirCobro(${v.id}, ${v.citaId})">
+                    <i class="fa-solid fa-rotate-left"></i> Anular
+               </button>`;
 
         return `
             <tr>
-                <td>${fechaFormateada}</td>
-                <td>${cli ? cli.nombre : 'Eliminada'}</td>
-                <td>${ser ? ser.nombre : 'Eliminado'}</td>
-                <td><span class="badge bg-secondary">${v.metodoPago}</span></td>
-                <td class="fw-bold">${v.importe}€</td>
+                <td>${formatearFechaCorta(v.fecha)}</td>
+                <td>${escaparHtml(v.clienta)}</td>
+                <td>${escaparHtml(v.concepto)}</td>
+                <td><span class="badge bg-secondary">${escaparHtml(v.metodoPago)}</span></td>
+                <td class="fw-bold">${formatearEuros(v.importe)}</td>
+                <td class="text-end">${accion}</td>
+            </tr>
+        `;
+    });
+
+    tabla.innerHTML = filasHTML.join("") || `<tr><td colspan="6" class="text-center text-muted py-4">Todavía no hay ventas.</td></tr>`;
+    document.getElementById("totalCajaGeneral").innerText = formatearEuros(totalServicios + totalProductos);
+    const desglose = document.getElementById("desgloseCaja");
+    if (desglose) {
+        desglose.textContent = `Servicios ${formatearEuros(totalServicios)} · Pendinails ${formatearEuros(totalProductos)}`;
+    }
+}
+
+function actualizarTotalPendinails() {
+    const precio = parseFloat(document.getElementById("pendiPrecio").value);
+    const cantidad = parseInt(document.getElementById("pendiCantidad").value, 10);
+    const precioOk = Number.isFinite(precio) && precio >= 0 ? precio : 0;
+    const cantidadOk = Number.isInteger(cantidad) && cantidad >= 1 ? cantidad : 0;
+    const total = Math.round(precioOk * cantidadOk * 100) / 100;
+
+    document.getElementById("pendiDetalle").textContent = `${cantidadOk} × ${precioOk.toFixed(2)}€`;
+    document.getElementById("pendiTotal").textContent = formatearEuros(total);
+}
+
+async function abrirVentaPendinails() {
+    const clis = await db.clientas.toArray();
+    clis.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
+
+    const sel = document.getElementById("pendiClienta");
+    sel.innerHTML = `<option value="">Cliente varios</option>` + clis
+        .map(c => `<option value="${c.id}">${escaparHtml(c.nombre)}</option>`)
+        .join("");
+
+    document.getElementById("pendiPrecio").value = "7";
+    document.getElementById("pendiCantidad").value = "1";
+    document.getElementById("pendiMetodoPago").value = "Efectivo";
+    actualizarTotalPendinails();
+
+    new bootstrap.Modal(document.getElementById("modalPendinails")).show();
+}
+
+async function guardarVentaPendinails() {
+    const precio = parseFloat(document.getElementById("pendiPrecio").value);
+    const cantidad = parseInt(document.getElementById("pendiCantidad").value, 10);
+    const clienteRaw = document.getElementById("pendiClienta").value;
+    const metodo = document.getElementById("pendiMetodoPago").value;
+
+    if (!Number.isFinite(precio) || precio < 0) {
+        alert("Introduce un precio válido.");
+        return;
+    }
+    if (!Number.isInteger(cantidad) || cantidad < 1) {
+        alert("La cantidad tiene que ser al menos 1.");
+        return;
+    }
+
+    const importe = Math.round(precio * cantidad * 100) / 100;
+
+    try {
+        await db.ventasPendinails.add({
+            clienteId: clienteRaw ? parseInt(clienteRaw, 10) : null,
+            articulo: "Pendinails",
+            precioUnitario: precio,
+            cantidad,
+            importe,
+            metodoPago: metodo,
+            fecha: new Date().toISOString()
+        });
+
+        cerrarModal("modalPendinails");
+
+        await listarVentasPendinails();
+        await cargarHistorialVentas();
+
+        const modalClienta = document.getElementById("modalClienta");
+        const editId = modalClienta && modalClienta.getAttribute("data-edit-id");
+        if (editId) await renderHistorialPendinails(editId);
+
+        alert(`Venta registrada: ${cantidad} Pendinails · ${formatearEuros(importe)}`);
+    } catch (error) {
+        console.error("Error al registrar Pendinails:", error);
+        alert("No se pudo registrar la venta.");
+    }
+}
+
+async function anularVentaPendinails(id) {
+    if (!confirm("¿Segura que quieres anular esta venta de Pendinails?")) return;
+
+    try {
+        await db.ventasPendinails.delete(parseInt(id, 10));
+        await listarVentasPendinails();
+        await cargarHistorialVentas();
+
+        const modalClienta = document.getElementById("modalClienta");
+        const editId = modalClienta && modalClienta.getAttribute("data-edit-id");
+        if (editId) await renderHistorialPendinails(editId);
+    } catch (error) {
+        console.error("Error al anular Pendinails:", error);
+        alert("No se pudo anular la venta.");
+    }
+}
+
+async function listarVentasPendinails() {
+    const tabla = document.getElementById("tablaPendinailsBody");
+    if (!tabla) return;
+
+    const [ventas, clientas] = await Promise.all([
+        db.ventasPendinails.orderBy("fecha").reverse().toArray(),
+        db.clientas.toArray()
+    ]);
+    const nombreClienta = new Map(clientas.map(c => [c.id, c.nombre]));
+    let total = 0;
+
+    tabla.innerHTML = ventas.map(v => {
+        total += Number(v.importe) || 0;
+        const clienta = v.clienteId ? (nombreClienta.get(v.clienteId) || "Eliminada") : "Cliente varios";
+        return `
+            <tr>
+                <td>${formatearFechaCorta(v.fecha)}</td>
+                <td>${escaparHtml(clienta)}</td>
+                <td>${v.cantidad}</td>
+                <td>${formatearEuros(v.precioUnitario)}</td>
+                <td><span class="badge bg-secondary">${escaparHtml(v.metodoPago)}</span></td>
+                <td class="fw-bold">${formatearEuros(v.importe)}</td>
                 <td class="text-end">
-                    <button class="btn btn-sm btn-outline-danger" onclick="revertirCobro(${v.id}, ${v.citaId})">
+                    <button class="btn btn-sm btn-outline-danger" onclick="anularVentaPendinails(${v.id})">
                         <i class="fa-solid fa-rotate-left"></i> Anular
                     </button>
                 </td>
             </tr>
         `;
-    }));
+    }).join("") || `<tr><td colspan="7" class="text-center text-muted py-4">Todavía no hay ventas de Pendinails.</td></tr>`;
 
-    tabla.innerHTML = filasHTML.join('');
-    document.getElementById('totalCajaGeneral').innerText = `${totalAcumulado.toFixed(2)}€`;
+    const totalEl = document.getElementById("totalPendinails");
+    if (totalEl) totalEl.textContent = formatearEuros(total);
+}
+
+async function renderHistorialPendinails(clienteId) {
+    const cont = document.getElementById("historialPendinails");
+    if (!cont) return;
+    if (!clienteId) {
+        cont.innerHTML = "";
+        return;
+    }
+
+    const ventas = await db.ventasPendinails.where("clienteId").equals(parseInt(clienteId, 10)).toArray();
+    ventas.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+    if (ventas.length === 0) {
+        cont.innerHTML = `<div class="small text-muted mb-3">Pendinails: sin compras.</div>`;
+        return;
+    }
+
+    const filas = ventas.map(v => `
+        <li class="d-flex justify-content-between gap-3 small py-1 border-bottom">
+            <span>${formatearFechaCorta(v.fecha)} · ${v.cantidad} × ${formatearEuros(v.precioUnitario)} · ${escaparHtml(v.metodoPago)}</span>
+            <span class="fw-bold">${formatearEuros(v.importe)}</span>
+        </li>
+    `).join("");
+
+    cont.innerHTML = `
+        <div class="mb-3">
+            <div class="small fw-bold text-gold mb-1">PENDINAILS</div>
+            <ul class="list-unstyled mb-0">${filas}</ul>
+        </div>
+    `;
 }
 
 
@@ -499,6 +733,7 @@ function abrirModalNuevoCliente() {
     
     // Ocultamos el botón eliminar para nuevas clientas
     document.getElementById('btnEliminarClienta').style.display = 'none';
+    renderHistorialPendinails(null);
 
     // 4. Mostramos el modal
     const modalInstance = new bootstrap.Modal(modalEl);
@@ -614,6 +849,8 @@ async function prepararEdicionClienta(id) {
             </div>
         `;
     }
+
+    await renderHistorialPendinails(id);
 
     // 5. Mostramos el modal
     const modalInstance = new bootstrap.Modal(modalEl);
@@ -904,20 +1141,21 @@ async function forzarDesbloqueo() {
 async function exportarBackup() {
     try {
         // 1. Extraemos los datos (Tu lógica original que funciona perfecto)
-        const [clientas, servicios, agenda, ventas] = await Promise.all([
+        const [clientas, servicios, agenda, ventas, ventasPendinails] = await Promise.all([
             db.clientas.toArray(),
             db.servicios.toArray(),
             db.agenda.toArray(),
-            db.ventas.toArray()
+            db.ventas.toArray(),
+            db.ventasPendinails.toArray()
         ]);
         
         const ahora = new Date();
         const backupData = {
             info: {
                 fecha: ahora.toLocaleString(),
-                totalRegistros: clientas.length + servicios.length + agenda.length + ventas.length
+                totalRegistros: clientas.length + servicios.length + agenda.length + ventas.length + ventasPendinails.length
             },
-            tablas: { clientas, servicios, agenda, ventas }
+            tablas: { clientas, servicios, agenda, ventas, ventasPendinails }
         };
 
         // 2. Creamos el archivo
@@ -979,16 +1217,21 @@ async function importarBackup(event) {
                 db.clientas.clear(),
                 db.servicios.clear(),
                 db.agenda.clear(),
-                db.ventas.clear()
+                db.ventas.clear(),
+                db.ventasPendinails.clear()
             ]);
 
             // 2. Insertamos los datos del archivo
-            await Promise.all([
-                db.clientas.bulkAdd(contenido.tablas.clientas),
-                db.servicios.bulkAdd(contenido.tablas.servicios),
-                db.agenda.bulkAdd(contenido.tablas.agenda),
-                db.ventas.bulkAdd(contenido.tablas.ventas)
-            ]);
+            const restaurar = [
+                db.clientas.bulkAdd(contenido.tablas.clientas || []),
+                db.servicios.bulkAdd(contenido.tablas.servicios || []),
+                db.agenda.bulkAdd(contenido.tablas.agenda || []),
+                db.ventas.bulkAdd(contenido.tablas.ventas || [])
+            ];
+            if (Array.isArray(contenido.tablas.ventasPendinails) && contenido.tablas.ventasPendinails.length) {
+                restaurar.push(db.ventasPendinails.bulkAdd(contenido.tablas.ventasPendinails));
+            }
+            await Promise.all(restaurar);
 
             alert("¡Éxito! Datos restaurados correctamente. La página se recargará ahora.");
             location.reload(); // Recargamos para que la agenda y listas se actualicen
