@@ -23,6 +23,11 @@ db.version(4).stores({
     registroCumples: "++id, [clienteId+fecha], clienteId, fecha, estado"
 });
 
+// Ventas de producto. Van aparte de las citas para no contar como sesión.
+db.version(5).stores({
+    ventasPendinails: "++id, clienteId, fecha"
+});
+
 // --- 🎨 CONFIGURACIÓN DE COLORES SWEETALERT2 PARA ELI-GR NAILS ---
 const swalConfig = {
     background: '#1a1a1a', 
@@ -302,6 +307,10 @@ function configurarRefrescoPestanas() {
 
     document.getElementById('tab-ventas')?.addEventListener('shown.bs.tab', () => {
         if (typeof cargarHistorialVentas === 'function') cargarHistorialVentas();
+    });
+
+    document.getElementById('tab-pendinails')?.addEventListener('shown.bs.tab', () => {
+        if (typeof listarVentasPendinails === 'function') listarVentasPendinails();
     });
 }
 
@@ -1185,6 +1194,7 @@ async function calcularDatosDashboard() {
     let ingresosHoy = 0, ingresosSem = 0, ingresosSemPas = 0;
     let ingresosMes = 0, ingresosMesPas = 0;
     let ingresosMioMes = 0, ingresosLomaMes = 0;
+    let ingresosProductosMes = 0;
     const ingresosPorDia7 = Array(7).fill(0);
     const conteoServiciosMes = {};
     const ingresosServiciosMes = {};
@@ -1227,6 +1237,32 @@ async function calcularDatosDashboard() {
                 ingresosServiciosMes[nom] = (ingresosServiciosMes[nom] || 0) + importe;
             }
         }
+    });
+
+    const pendinails = await db.ventasPendinails.toArray();
+    pendinails.forEach(p => {
+        const f = parseFechaVenta(p.fecha);
+        if (isNaN(f.getTime())) return;
+        const importe = parseFloat(p.importe) || 0;
+        if (importe <= 0) return;
+        const ts = f.getTime();
+        const cid = p.clienteId != null ? parseInt(p.clienteId, 10) : null;
+
+        if (ts >= hoy0.getTime() && ts < manana0.getTime()) ingresosHoy += importe;
+        if (ts >= iniSem.getTime() && ts <= ahora.getTime()) ingresosSem += importe;
+        if (ts >= iniSemPas.getTime() && ts <= finSemPasComp.getTime()) ingresosSemPas += importe;
+        if (ts >= iniMes.getTime() && ts <= ahora.getTime()) {
+            ingresosMes += importe;
+            ingresosProductosMes += importe;
+            if (cid === idLoma) ingresosLomaMes += importe;
+            else ingresosMioMes += importe;
+        }
+        if (ts >= iniMesPas.getTime() && ts <= finMesPasComp.getTime()) ingresosMesPas += importe;
+
+        const diasAtras = Math.floor((hoy0 - inicioDia(f)) / 86400000);
+        if (diasAtras >= 0 && diasAtras < 7) ingresosPorDia7[6 - diasAtras] += importe;
+
+        if (cid != null) totalGastadoPorCliente[cid] = (totalGastadoPorCliente[cid] || 0) + importe;
     });
 
     const citasHoy = agenda.filter(c => esMismoDia(parseFechaVenta(c.fecha), ahora)).length;
@@ -1278,7 +1314,7 @@ async function calcularDatosDashboard() {
         const f = parseFechaVenta(v.fecha);
         return !isNaN(f.getTime()) && f >= iniMes && parseFloat(v.importe) > 0;
     }).length;
-    const ticketMedio = visitasPagadasMes > 0 ? ingresosMes / visitasPagadasMes : 0;
+    const ticketMedio = visitasPagadasMes > 0 ? (ingresosMes - ingresosProductosMes) / visitasPagadasMes : 0;
 
     const diasMes = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0).getDate();
     const proyeccionMes = ahora.getDate() > 0 ? (ingresosMes / ahora.getDate()) * diasMes : 0;
@@ -2207,7 +2243,30 @@ async function cargarHistorialVentas() {
     cargandoHistorialVentas = true;
 
     try {
-    const ventas = await db.ventas.orderBy('fecha').reverse().toArray();
+    const [ventas, pendinails, clientasTodas, serviciosTodos] = await Promise.all([
+        db.ventas.toArray(),
+        db.ventasPendinails.toArray(),
+        db.clientas.toArray(),
+        db.servicios.toArray()
+    ]);
+    const clientaPorId = new Map(clientasTodas.map(c => [c.id, c]));
+    const servicioPorId = new Map(serviciosTodos.map(s => [s.id, s]));
+    const lineas = [
+        ...ventas.map(v => ({
+            v,
+            cli: clientaPorId.get(v.clienteId) || null,
+            ser: servicioPorId.get(v.servicioId) || null,
+            producto: false
+        })),
+        ...pendinails.map(p => ({
+            v: p,
+            cli: p.clienteId
+                ? (clientaPorId.get(p.clienteId) || null)
+                : { nombre: "Cliente varios" },
+            ser: { nombre: `Pendinails × ${p.cantidad}` },
+            producto: true
+        }))
+    ];
     
     let contenedor = document.getElementById('acordeonVentas');
     const tablaOriginal = document.getElementById('tablaVentasBody');
@@ -2222,6 +2281,8 @@ async function cargarHistorialVentas() {
     }
 
     let totalAcumulado = 0;
+    let totalServicios = 0;
+    let totalProductos = 0;
 
     const ahora = new Date();
     const hoyInicio = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate()).getTime();
@@ -2234,21 +2295,21 @@ async function cargarHistorialVentas() {
 
     const grupos = { hoy: [], semana: [], mes: [], año: [], resto: [] };
 
-    await Promise.all(ventas.map(async (v) => {
-        const cli = await db.clientas.get(v.clienteId);
-        const ser = await db.servicios.get(v.servicioId);
-        
-        totalAcumulado += v.importe;
-        const fVenta = parseFechaVenta(v.fecha).getTime();
+    lineas.forEach(item => {
+        const importe = parseFloat(item.v.importe) || 0;
+        totalAcumulado += importe;
+        if (item.producto) totalProductos += importe;
+        else totalServicios += importe;
+
+        const fVenta = parseFechaVenta(item.v.fecha).getTime();
         if (isNaN(fVenta)) return;
-        const item = { v, cli, ser };
 
         if (fVenta >= hoyInicio) grupos.hoy.push(item);
         if (fVenta >= inicioSemana) grupos.semana.push(item);
         if (fVenta >= inicioMes) grupos.mes.push(item);
         if (fVenta >= inicioAño) grupos.año.push(item);
         if (fVenta < inicioAño) grupos.resto.push(item);
-    }));
+    });
 
     // --- FUNCIÓN MODIFICADA PARA LAS 3 COLUMNAS ---
     const crearSeccion = (titulo, id, datos, abierto = false) => {
@@ -2308,11 +2369,11 @@ async function cargarHistorialVentas() {
                                             ${item.cli ? escaparHTML(item.cli.nombre) : '---'}
                                         </td>
                                         <td>${item.ser ? escaparHTML(item.ser.nombre) : '---'}</td>
-                                        <td class="fw-bold">${item.v.importe.toFixed(2)}€</td>
+                                        <td class="fw-bold">${(parseFloat(item.v.importe) || 0).toFixed(2)}€</td>
                                         <td class="text-end pe-3">
-                                            <button class="btn btn-sm btn-outline-danger" onclick="revertirCobro(${item.v.id}, ${item.v.citaId})">
-                                                <i class="fa-solid fa-rotate-left"></i>
-                                            </button>
+                                            ${item.producto
+                                                ? `<button class="btn btn-sm btn-outline-danger" onclick="anularVentaPendinails(${item.v.id})"><i class="fa-solid fa-rotate-left"></i></button>`
+                                                : `<button class="btn btn-sm btn-outline-danger" onclick="revertirCobro(${item.v.id}, ${item.v.citaId})"><i class="fa-solid fa-rotate-left"></i></button>`}
                                         </td>
                                     </tr>
                                 `).join('')}
@@ -2335,10 +2396,12 @@ async function cargarHistorialVentas() {
 
     const elTotal = document.getElementById('totalCajaGeneral');
     if (elTotal) elTotal.innerText = `${totalAcumulado.toFixed(2)}€`;
+    const desglose = document.getElementById('desgloseCaja');
+    if (desglose) desglose.textContent = `Servicios ${totalServicios.toFixed(2)}€ · Pendinails ${totalProductos.toFixed(2)}€`;
 
     setTimeout(() => {
         if (typeof renderizarGraficos === 'function') {
-            renderizarGraficos(ventas);
+            renderizarGraficos(lineas.map(item => item.v));
         }
     }, 100);
     } finally {
@@ -2348,6 +2411,163 @@ async function cargarHistorialVentas() {
             cargarHistorialVentas();
         }
     }
+}
+
+function actualizarTotalPendinails() {
+    const precio = parseFloat(document.getElementById("pendiPrecio").value);
+    const cantidad = parseInt(document.getElementById("pendiCantidad").value, 10);
+    const precioOk = Number.isFinite(precio) && precio >= 0 ? precio : 0;
+    const cantidadOk = Number.isInteger(cantidad) && cantidad >= 1 ? cantidad : 0;
+    const total = Math.round(precioOk * cantidadOk * 100) / 100;
+    document.getElementById("pendiDetalle").textContent = `${cantidadOk} × ${precioOk.toFixed(2)}€`;
+    document.getElementById("pendiTotal").textContent = `${total.toFixed(2)}€`;
+}
+
+async function abrirVentaPendinails() {
+    const clis = await db.clientas.toArray();
+    clis.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
+    const sel = document.getElementById("pendiClienta");
+    sel.innerHTML = `<option value="">Cliente varios</option>` + clis
+        .map(c => `<option value="${c.id}">${escaparHTML(c.nombre)}</option>`)
+        .join("");
+    document.getElementById("pendiPrecio").value = "7";
+    document.getElementById("pendiCantidad").value = "1";
+    document.getElementById("pendiMetodoPago").value = "Efectivo";
+    actualizarTotalPendinails();
+    mostrarModal("modalPendinails");
+}
+
+function mostrarModal(id) {
+    const el = document.getElementById(id);
+    const modal = bootstrap.Modal.getOrCreateInstance(el);
+    if (modal._isTransitioning && !modal._isShown) {
+        el.addEventListener("hidden.bs.modal", () => modal.show(), { once: true });
+        return;
+    }
+    if (!modal._isShown) modal.show();
+}
+
+async function guardarVentaPendinails() {
+    const precio = parseFloat(document.getElementById("pendiPrecio").value);
+    const cantidad = parseInt(document.getElementById("pendiCantidad").value, 10);
+    const clienteRaw = document.getElementById("pendiClienta").value;
+    const metodo = document.getElementById("pendiMetodoPago").value;
+
+    if (!Number.isFinite(precio) || precio < 0) {
+        Swal.fire({ ...swalConfig, icon: "warning", title: "Precio no válido", text: "Introduce un precio de 0 o más.", confirmButtonText: "Corregir" });
+        return;
+    }
+    if (!Number.isInteger(cantidad) || cantidad < 1) {
+        Swal.fire({ ...swalConfig, icon: "warning", title: "Cantidad no válida", text: "La cantidad tiene que ser al menos 1.", confirmButtonText: "Corregir" });
+        return;
+    }
+
+    const importe = Math.round(precio * cantidad * 100) / 100;
+    const clienteId = clienteRaw ? parseInt(clienteRaw, 10) : null;
+
+    try {
+        await db.ventasPendinails.add({
+            clienteId,
+            articulo: "Pendinails",
+            precioUnitario: precio,
+            cantidad,
+            importe,
+            metodoPago: metodo,
+            fecha: new Date().toISOString()
+        });
+
+        bootstrap.Modal.getInstance(document.getElementById("modalPendinails"))?.hide();
+        await listarVentasPendinails();
+        if (typeof cargarHistorialVentas === "function") await cargarHistorialVentas();
+        if (typeof cargarDashboard === "function") cargarDashboard();
+        await refrescarFichaPendinails(clienteId);
+
+        Swal.fire({
+            ...swalConfig,
+            icon: "success",
+            title: "Venta registrada",
+            text: `${cantidad} Pendinails · ${importe.toFixed(2)}€`,
+            confirmButtonText: "Entendido"
+        });
+    } catch (error) {
+        console.error("Error al registrar Pendinails:", error);
+        Swal.fire({ ...swalConfig, icon: "error", title: "No se pudo registrar", text: "Revisa la conexión de la base de datos e inténtalo de nuevo.", confirmButtonText: "Cerrar" });
+    }
+}
+
+async function anularVentaPendinails(id) {
+    const venta = await db.ventasPendinails.get(parseInt(id, 10));
+    if (!venta) return;
+
+    const result = await Swal.fire({
+        ...swalConfig,
+        icon: "question",
+        title: "¿Anular esta venta de Pendinails?",
+        text: "Se quitará del historial y de la caja. No afecta a las sesiones de la clienta.",
+        showCancelButton: true,
+        confirmButtonText: "Sí, anular",
+        cancelButtonText: "Cancelar",
+        confirmButtonColor: "#d33",
+        cancelButtonColor: "#444"
+    });
+    if (!result.isConfirmed) return;
+
+    try {
+        await db.ventasPendinails.delete(venta.id);
+        await listarVentasPendinails();
+        if (typeof cargarHistorialVentas === "function") await cargarHistorialVentas();
+        if (typeof cargarDashboard === "function") cargarDashboard();
+        await refrescarFichaPendinails(venta.clienteId);
+    } catch (error) {
+        console.error("Error al anular Pendinails:", error);
+        Swal.fire({ ...swalConfig, icon: "error", title: "No se pudo anular", confirmButtonText: "Cerrar" });
+    }
+}
+
+async function listarVentasPendinails() {
+    const tabla = document.getElementById("tablaPendinailsBody");
+    if (!tabla) return;
+
+    const [ventas, clientas] = await Promise.all([
+        db.ventasPendinails.orderBy("fecha").reverse().toArray(),
+        db.clientas.toArray()
+    ]);
+    const nombreClienta = new Map(clientas.map(c => [c.id, c.nombre]));
+    let total = 0;
+
+    tabla.innerHTML = ventas.map(v => {
+        total += Number(v.importe) || 0;
+        const fecha = parseFechaVenta(v.fecha);
+        const fechaTxt = isNaN(fecha.getTime())
+            ? "—"
+            : `${fecha.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })} ${fecha.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}`;
+        const clienta = v.clienteId ? (nombreClienta.get(v.clienteId) || "Eliminada") : "Cliente varios";
+        return `
+            <tr>
+                <td>${fechaTxt}</td>
+                <td>${escaparHTML(clienta)}</td>
+                <td>${v.cantidad}</td>
+                <td>${(Number(v.precioUnitario) || 0).toFixed(2)}€</td>
+                <td><span class="badge bg-secondary">${escaparHTML(v.metodoPago || "")}</span></td>
+                <td class="fw-bold">${(Number(v.importe) || 0).toFixed(2)}€</td>
+                <td class="text-end">
+                    <button class="btn btn-sm btn-outline-danger" onclick="anularVentaPendinails(${v.id})">
+                        <i class="fa-solid fa-rotate-left"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join("") || `<tr><td colspan="7" class="text-center text-muted py-4">Todavía no hay ventas de Pendinails.</td></tr>`;
+
+    const totalEl = document.getElementById("totalPendinails");
+    if (totalEl) totalEl.textContent = `${total.toFixed(2)}€`;
+}
+
+async function refrescarFichaPendinails(clienteId) {
+    const modal = document.getElementById("modalDashboardClienta");
+    if (!modal || !modal.classList.contains("show") || !clienteId) return;
+    if (String(modal.getAttribute("data-cliente-id")) !== String(clienteId)) return;
+    await abrirDashboardClienta(clienteId);
 }
 
 // =========================================
@@ -2545,15 +2765,17 @@ async function abrirDashboardClienta(id) {
     document.getElementById('dashboardClientaTitulo').textContent = c.nombre || 'Clienta';
 
     const estado = await obtenerEstadoFidelidad(idNum);
-    const ventas = await db.ventas.where('clienteId').equals(idNum).toArray();
-    ventas.sort((a, b) => parseFechaVenta(b.fecha) - parseFechaVenta(a.fecha));
+    const [ventas, pendinailsClienta] = await Promise.all([
+        db.ventas.where('clienteId').equals(idNum).toArray(),
+        db.ventasPendinails.where('clienteId').equals(idNum).toArray()
+    ]);
 
     let totalEuros = 0;
     let visitasPagadas = 0;
     let regalos = 0;
     const conteoServicios = {};
 
-    const historial = await Promise.all(ventas.map(async (v) => {
+    const historialServicios = await Promise.all(ventas.map(async (v) => {
         const ser = await db.servicios.get(parseInt(v.servicioId));
         const nombreServicio = ser ? ser.nombre : 'Servicio eliminado';
         const importe = parseFloat(v.importe) || 0;
@@ -2569,9 +2791,23 @@ async function abrirDashboardClienta(id) {
         return { v, nombreServicio, importe };
     }));
 
+    const historialProductos = pendinailsClienta.map(p => {
+        const importe = parseFloat(p.importe) || 0;
+        totalEuros += importe;
+        return {
+            v: p,
+            nombreServicio: `Pendinails × ${p.cantidad}`,
+            importe
+        };
+    });
+
+    const historial = [...historialServicios, ...historialProductos]
+        .sort((a, b) => parseFechaVenta(b.v.fecha) - parseFechaVenta(a.v.fecha));
+    const ventasOrdenadas = [...ventas].sort((a, b) => parseFechaVenta(b.fecha) - parseFechaVenta(a.fecha));
+
     const servicioFavorito = Object.entries(conteoServicios).sort((a, b) => b[1] - a[1])[0];
-    const primeraVisita = ventas.length ? parseFechaVenta(ventas[ventas.length - 1].fecha) : null;
-    const ultimaVisita = ventas.length ? parseFechaVenta(ventas[0].fecha) : null;
+    const primeraVisita = ventasOrdenadas.length ? parseFechaVenta(ventasOrdenadas[ventasOrdenadas.length - 1].fecha) : null;
+    const ultimaVisita = ventasOrdenadas.length ? parseFechaVenta(ventasOrdenadas[0].fecha) : null;
 
     const fmtFecha = (f) => f && !isNaN(f.getTime())
         ? f.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -2882,12 +3118,14 @@ async function ejecutarEliminarClienta() {
                 // 2. 🔄 TRASPASAR HISTORIAL (Citas y Ventas)
                 const citas = await db.agenda.where('clienteId').equals(clienteIdNum).toArray();
                 const ventas = await db.ventas.where('clienteId').equals(clienteIdNum).toArray();
+                const pendinailsBaja = await db.ventasPendinails.where('clienteId').equals(clienteIdNum).toArray();
 
                 // Actualizamos cada cita y venta para que ahora pertenezcan a "Ex-Clienta"
                 const promesasCitas = citas.map(c => db.agenda.update(c.id, { clienteId: exClienta.id }));
                 const promesasVentas = ventas.map(v => db.ventas.update(v.id, { clienteId: exClienta.id }));
+                const promesasPendinails = pendinailsBaja.map(p => db.ventasPendinails.update(p.id, { clienteId: exClienta.id }));
 
-                await Promise.all([...promesasCitas, ...promesasVentas]);
+                await Promise.all([...promesasCitas, ...promesasVentas, ...promesasPendinails]);
 
                 // 3. 🗑️ BORRAR FICHA ORIGINAL
                 await db.clientas.delete(clienteIdNum);
@@ -3203,21 +3441,22 @@ async function exportarBackup() {
         });
         if (password === undefined) return;
 
-        const [clientas, servicios, agenda, ventas, registroCumples] = await Promise.all([
+        const [clientas, servicios, agenda, ventas, registroCumples, ventasPendinails] = await Promise.all([
             db.clientas.toArray(),
             db.servicios.toArray(),
             db.agenda.toArray(),
             db.ventas.toArray(),
-            db.registroCumples.toArray()
+            db.registroCumples.toArray(),
+            db.ventasPendinails.toArray()
         ]);
         
         const ahora = new Date();
         const backupData = {
             info: {
                 fecha: ahora.toLocaleString(),
-                totalRegistros: clientas.length + servicios.length + agenda.length + ventas.length + registroCumples.length
+                totalRegistros: clientas.length + servicios.length + agenda.length + ventas.length + registroCumples.length + ventasPendinails.length
             },
-            tablas: { clientas, servicios, agenda, ventas, registroCumples }
+            tablas: { clientas, servicios, agenda, ventas, registroCumples, ventasPendinails }
         };
 
         let contenidoFinal;
@@ -3287,7 +3526,8 @@ function extraerTablasBackup(contenido) {
         servicios: origen.servicios,
         agenda: Array.isArray(origen.agenda) ? origen.agenda : [],
         ventas: Array.isArray(origen.ventas) ? origen.ventas : [],
-        registroCumples: Array.isArray(origen.registroCumples) ? origen.registroCumples : []
+        registroCumples: Array.isArray(origen.registroCumples) ? origen.registroCumples : [],
+        ventasPendinails: Array.isArray(origen.ventasPendinails) ? origen.ventasPendinails : []
     };
 }
 
@@ -3343,24 +3583,36 @@ function prepararTablasImport(tablas) {
         return reg;
     });
 
-    return { clientas, servicios, agenda, ventas, registroCumples };
+    const ventasPendinails = (tablas.ventasPendinails || []).map(p => {
+        const reg = { ...p };
+        if (reg.id != null) reg.id = parseInt(reg.id, 10);
+        if (reg.clienteId != null) reg.clienteId = parseInt(reg.clienteId, 10);
+        if (reg.precioUnitario != null) reg.precioUnitario = parseFloat(reg.precioUnitario);
+        if (reg.cantidad != null) reg.cantidad = parseInt(reg.cantidad, 10);
+        if (reg.importe != null) reg.importe = parseFloat(reg.importe);
+        return reg;
+    });
+
+    return { clientas, servicios, agenda, ventas, registroCumples, ventasPendinails };
 }
 
 async function volcarBackupEnBD(tablas) {
     const datos = prepararTablasImport(tablas);
 
-    await db.transaction('rw', db.clientas, db.servicios, db.agenda, db.ventas, db.registroCumples, async () => {
+    await db.transaction('rw', db.clientas, db.servicios, db.agenda, db.ventas, db.registroCumples, db.ventasPendinails, async () => {
         await db.clientas.clear();
         await db.servicios.clear();
         await db.agenda.clear();
         await db.ventas.clear();
         await db.registroCumples.clear();
+        await db.ventasPendinails.clear();
 
         if (datos.clientas.length) await db.clientas.bulkPut(datos.clientas);
         if (datos.servicios.length) await db.servicios.bulkPut(datos.servicios);
         if (datos.agenda.length) await db.agenda.bulkPut(datos.agenda);
         if (datos.ventas.length) await db.ventas.bulkPut(datos.ventas);
         if (datos.registroCumples.length) await db.registroCumples.bulkPut(datos.registroCumples);
+        if (datos.ventasPendinails.length) await db.ventasPendinails.bulkPut(datos.ventasPendinails);
     });
 }
 
